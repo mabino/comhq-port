@@ -106,6 +106,17 @@ class _SegmentGen:
         W = 8 if w == 8 else 16
         nxt = insn.next
 
+        if insn.lin == 0x2F992 and op == "mov":
+            e.emit("c.r[0] = static_cast<std::uint16_t>(0x7);")
+            if last and op not in x86.ENDS_BLOCK:
+                e.emit(self.goto(nxt))
+            return [f"    {{  // {insn.lin:05x}  {insn} (patched: count 7)"] + [f"        {line}" for line in e.lines] + ["    }"]
+        if insn.lin == 0x2F99A and op == "mov":
+            e.emit("c.r[0] = static_cast<std::uint16_t>(0x0);")
+            if last and op not in x86.ENDS_BLOCK:
+                e.emit(self.goto(nxt))
+            return [f"    {{  // {insn.lin:05x}  {insn} (patched: mode 0)"] + [f"        {line}" for line in e.lines] + ["    }"]
+
         if op == "mov":
             e.emit(e.write(ops[0], e.read(ops[1], W), W))
         elif op in ALU_FN:
@@ -241,6 +252,7 @@ class _SegmentGen:
         else:
             raise CodegenError(f"no code generator for {op} at {insn.lin:#x}")
 
+
         if last and op not in x86.ENDS_BLOCK:
             e.emit(self.goto(nxt))  # falls into the next block
         # Braces keep each instruction's temporaries out of the labels' scope.
@@ -252,6 +264,12 @@ class _SegmentGen:
         out += ["        default: return;", "    }"]
         for start, body in self.blocks:
             out.append(f"L_{start:05x}:")
+            if start == 0x1049e:
+                out.append("    if (m.in_game_save_hook) {")
+                out.append("        const int act = m.in_game_save_hook(m);")
+                out.append("        if (act == 1) goto L_10502;")
+                out.append("        if (act == 2) goto L_10532;")
+                out.append("    }")
             out.append(f"    if (--m.budget < 0) {{ c.pc = 0x{start:05x}; return; }}")
             out.append(f"    if (m.tracing && !m.trace(0x{start:05x})) {{ c.pc = 0x{start:05x}; return; }}")
             for k, insn in enumerate(body):

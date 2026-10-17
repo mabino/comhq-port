@@ -104,6 +104,16 @@ public:
     bool has_unsaved_progress() const { return state_ == State::Running && unsaved_progress_; }
     void mark_unsaved() { unsaved_progress_ = true; }
     void mark_saved() { unsaved_progress_ = false; }
+    bool is_in_game() const {
+        if (in_title_intro_ || state_ != State::Running) return false;
+        return mem_[lin(kDgroupSeg, 0x147c)] != 0 || mem_[lin(kDgroupSeg, 0x147d)] != 0;
+    }
+    void trigger_save() {
+        if (is_in_game()) {
+            pending_in_game_save_ = true;
+        }
+    }
+    const std::deque<std::uint8_t>& pending_scancodes() const { return scancodes_; }
 
     // Statistics for development: code the recompiler missed.
     const std::map<std::uint32_t, std::uint64_t>& interpreted() const { return interpreted_; }
@@ -123,6 +133,7 @@ public:
     static constexpr std::size_t kTraceSize = 256;
     void set_tracing(bool on) { tracing = on; }
     std::function<bool(std::uint32_t)> block_hook;
+    std::function<int(Machine&)> in_game_save_hook;
     void set_interpret_only(bool on) { interpret_only_ = on; }
     void set_deterministic_ticks(bool on) { deterministic_ticks_ = on; }
     std::vector<std::uint32_t> trace_tail() const;
@@ -301,6 +312,7 @@ private:
     RestoreHook restore_hook_;
     SaveHook save_hook_;
     bool unsaved_progress_ = false;
+    bool pending_in_game_save_ = false;
     StartupSettings startup_settings_;
 
     std::uint16_t psp_seg_ = 0x0FF0;

@@ -113,6 +113,11 @@ void Machine::reset() {
     wr16(0x40, 0xF2, psp_seg_);    // default DTA segment
     if (!program_.image.empty()) {
         std::memcpy(&mem_[lin(program_.load_segment, 0)], program_.image.data(), program_.image.size());
+        // Patch Main Options menu to 7 items (mode 0), removing (Exit to DOS).
+        if (mem_.size() >= 0x2F99C) {
+            mem_[0x2F993] = 0x07;
+            mem_[0x2F99B] = 0x00;
+        }
     }
 
     cpu = Cpu{};
@@ -122,6 +127,7 @@ void Machine::reset() {
     far_jump(program_.cs, program_.ip);
     ega_.set_mode(3, true);
     state_ = State::Running;
+    pending_in_game_save_ = false;
     keys_.clear();
     scancodes_.clear();
     port60_ = 0;
@@ -212,6 +218,14 @@ Machine::State Machine::run(std::int64_t slice, double now_ms) {
         budget = std::min<std::int64_t>(remaining, 256);
         const std::int64_t sub_start = budget;
         deliver_hardware();
+        if (pending_in_game_save_ && is_in_game() && cpu.ifl && !pic_in_service_ &&
+            !(cpu.pc >= stub_lo && cpu.pc < stub_hi) && is_block(cpu.pc)) {
+            pending_in_game_save_ = false;
+            push(cpu.s[CS]);
+            push(cpu.ip());
+            cpu.s[CS] = 0x1000;
+            cpu.pc = 0x10492;
+        }
         while (budget >= 0 && state_ == State::Running) {
             const std::uint32_t pc = cpu.pc;
             if (pc >= stub_lo && pc < stub_hi) {
@@ -460,10 +474,17 @@ void Machine::key_down(std::uint8_t scan, std::uint8_t ascii) {
     const bool shifted_fn = scan >= 0x54 && scan <= 0x5D;
     const std::uint8_t phys_scan = shifted_fn ? static_cast<std::uint8_t>(0x3B + (scan - 0x54)) : scan;
     const bool need_shift = shifted_fn || is_shifted_ascii(ascii) || (shift_flags_ & 0x03) != 0;
+    const bool need_ctrl = (shift_flags_ & 0x04) != 0;
+    const bool need_alt = (shift_flags_ & 0x08) != 0;
+
+    if (need_ctrl) scancodes_.push_back(0x1D);   // Left Ctrl make
+    if (need_alt) scancodes_.push_back(0x38);    // Left Alt make
     if (need_shift) scancodes_.push_back(0x2A);  // Left Shift make
     scancodes_.push_back(phys_scan);
     scancodes_.push_back(static_cast<std::uint8_t>(phys_scan | 0x80));
     if (need_shift) scancodes_.push_back(0xAA);  // Left Shift break
+    if (need_alt) scancodes_.push_back(0xB8);    // Left Alt break
+    if (need_ctrl) scancodes_.push_back(0x9D);   // Left Ctrl break
     waiting_key_ = false;
 }
 

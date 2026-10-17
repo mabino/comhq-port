@@ -21,12 +21,20 @@ std::uint8_t host_shift_flags(SDL_Keymod mod) {
     return f;
 }
 
-std::optional<dos::BiosKey> host_key(SDL_Keycode key, SDL_Keymod mod) {
+std::optional<dos::BiosKey> host_key(SDL_Keycode key, SDL_Keymod mod, SDL_Scancode scancode) {
     const bool shift = mod & SDL_KMOD_SHIFT, ctrl = mod & SDL_KMOD_CTRL, alt = mod & SDL_KMOD_ALT;
     if (key >= SDLK_F1 && key <= SDLK_F10) {
         const int n = static_cast<int>(key - SDLK_F1);
         const int base = alt ? 0x68 : ctrl ? 0x5E : shift ? 0x54 : 0x3B;
         return dos::BiosKey{static_cast<std::uint8_t>(base + n), 0};
+    }
+    // On macOS, Alt (Option) pressed with letters produces unicode symbols (e.g. Option+P -> π).
+    // Translate the physical letter scancode to the PC BIOS Alt+letter keystroke.
+    if (alt && scancode >= SDL_SCANCODE_A && scancode <= SDL_SCANCODE_Z) {
+        const char ch = static_cast<char>('a' + (scancode - SDL_SCANCODE_A));
+        if (auto k = dos::key_for_char(ch)) {
+            return dos::BiosKey{k->scan, 0};
+        }
     }
     switch (key) {
         case SDLK_UP: return dos::key_for_name("UP");

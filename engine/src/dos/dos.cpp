@@ -77,6 +77,15 @@ std::optional<fs::path> Machine::host_path(const std::string& dos_name, bool for
     name = upper(name);
     if (name.empty() || name == "." || name == "..") return std::nullopt;
 
+    if (active_save_path_ && upper(name.size() >= 3 ? name.substr(name.size() - 3) : "") == ".SG") {
+        if (!for_write) {
+            std::error_code ec;
+            if (fs::exists(*active_save_path_, ec)) return *active_save_path_;
+        } else {
+            return *active_save_path_;
+        }
+    }
+
     const auto find_in = [&](const fs::path& dir) -> std::optional<fs::path> {
         std::error_code ec;
         if (dir.empty()) return std::nullopt;

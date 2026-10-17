@@ -88,4 +88,65 @@ TEST_CASE("Machine unsaved progress and host_path routing") {
     fs::remove_all(temp_dir);
 }
 
+TEST_CASE("Machine is_in_game detection and trigger_save") {
+    std::vector<std::uint8_t> image(0x4000, 0);
+    chq::dos::Program prog{image, 0x1000, 0x1000, 0, 0x1000, 0x200, 0, {}, {}, {}, {}};
+    chq::dos::Machine m(prog, {});
+
+    CHECK_FALSE(m.is_in_game());
+
+    // In-game state is indicated by non-zero active scenario/game mode in DGROUP (0x147c or 0x147d)
+    m.wr8(chq::dos::Machine::kDgroupSeg, 0x147c, 1);
+    CHECK(m.is_in_game());
+
+    m.wr8(chq::dos::Machine::kDgroupSeg, 0x147c, 0);
+    m.wr8(chq::dos::Machine::kDgroupSeg, 0x147d, 2);
+    CHECK(m.is_in_game());
+
+    m.wr8(chq::dos::Machine::kDgroupSeg, 0x147d, 0);
+    CHECK_FALSE(m.is_in_game());
+
+    m.trigger_save();
+}
+
+TEST_CASE("Machine active save path overrides default folder") {
+    fs::path temp_dir = fs::temp_directory_path() / "chq_test_machine_saves_def";
+    fs::create_directories(temp_dir);
+
+    std::vector<std::uint8_t> image(0x4000, 0);
+    chq::dos::Program prog{image, 0x1000, 0x1000, 0, 0x1000, 0x200, 0, {}, {}, {}, {}};
+    chq::dos::Machine m(prog, {{}, temp_dir});
+
+    fs::path custom_dir = fs::temp_directory_path() / "custom_dir";
+    fs::create_directories(custom_dir);
+    fs::path custom_save = custom_dir / "MY_GAME.SG";
+    { std::ofstream out(custom_save, std::ios::binary); out << "SAVE_DATA"; }
+
+    m.set_active_save_path(custom_save);
+    CHECK(m.active_save_path().has_value());
+    CHECK_EQ(*m.active_save_path(), custom_save);
+
+    auto routed_write = m.host_path("CHQ-00.SG", true);
+    REQUIRE(routed_write.has_value());
+    CHECK_EQ(*routed_write, custom_save);
+
+    auto routed_read = m.host_path("CHQ-00.SG", false);
+    REQUIRE(routed_read.has_value());
+    CHECK_EQ(*routed_read, custom_save);
+
+    fs::remove_all(temp_dir);
+    fs::remove_all(custom_dir);
+}
+
+TEST_CASE("Options menu patches remove Exit to DOS and resize box") {
+    std::vector<std::uint8_t> image(0x40000, 0);
+    chq::dos::Program prog{image, 0x1000, 0x1000, 0, 0x1000, 0x200, 0, {}, {}, {}, {}};
+    chq::dos::Machine m(prog, {});
+
+    // Linear 0x2F993 is patched to 0x07 (7 menu options instead of 8)
+    // Linear 0x2F99B is patched to 0x00 (mode 0 without Exit to DOS instead of mode 2)
+    CHECK_EQ(m.mem()[0x2F993], 0x07);
+    CHECK_EQ(m.mem()[0x2F99B], 0x00);
+}
+
 }  // TEST_SUITE("save_file")

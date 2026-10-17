@@ -14,6 +14,7 @@ add_library(chq_core
   src/dos/rom_font.cpp
   src/dos/speaker.cpp
   src/app/mouse_control.cpp
+  src/app/host_keys.cpp
 )
 target_include_directories(chq_core PUBLIC src)
 target_link_libraries(chq_core PUBLIC chq_flags)
@@ -53,7 +54,7 @@ else()
 endif()
 
 if(CHQ_BUILD_APP)
-  set(CHQ_APP_SOURCES src/app/main.cpp src/app/host_keys.cpp)
+  set(CHQ_APP_SOURCES src/app/main.cpp)
   if(APPLE AND NOT EMSCRIPTEN)
     list(APPEND CHQ_APP_SOURCES src/app/macos/macos_bridge.mm)
     set_source_files_properties(src/app/macos/macos_bridge.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
@@ -110,6 +111,7 @@ if(CHQ_BUILD_TESTS)
     tests/sound_state_test.cpp
     tests/window_geometry_test.cpp
     tests/mouse_control_test.cpp
+    tests/host_keys_test.cpp
   )
   target_link_libraries(chq_tests PRIVATE chq_core doctest::doctest)
   add_test(NAME unit COMMAND chq_tests)

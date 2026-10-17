@@ -50,6 +50,8 @@ struct App {
     std::string data_dir;
     std::string default_save_dir;
     std::string initial_save_to_load;
+    std::string active_save_path;
+    bool force_save_as = false;
     bool smoke = false;          // --smoke: run a few frames and exit (used by tests)
     int frames = 0;
     std::uint64_t persisted_writes = 0;
@@ -264,8 +266,52 @@ void start_game([[maybe_unused]] App& app) {
     app.machine = std::make_unique<chq::dos::Machine>(chq::recomp::program(),
                                                       chq::dos::FileSystem{data, saves});
     sync_machine_settings(app);
+    app.machine->set_save_hook([&app](chq::dos::Machine&, const fs::path& p) {
+        app.active_save_path = p.string();
+    });
+    app.machine->in_game_save_hook = [&app](chq::dos::Machine& m) -> int {
+#if defined(__APPLE__) && !defined(__EMSCRIPTEN__)
+        if (app.force_save_as || app.active_save_path.empty()) {
+            app.force_save_as = false;
+            char chosen[1024] = {0};
+            const char* def_dir = app.default_save_dir.empty() ? nullptr : app.default_save_dir.c_str();
+            const char* cur = app.active_save_path.empty() ? nullptr : app.active_save_path.c_str();
+            std::string def_name = cur ? fs::path(cur).filename().string() : "CHQ-00.SG";
+            if (!chq::macos::prompt_save_as_panel(chosen, sizeof(chosen), def_dir, def_name.c_str())) {
+                return 2;  // Cancel
+            }
+            app.active_save_path = chosen;
+        }
+        m.set_active_save_path(app.active_save_path);
+        const std::string fn = fs::path(app.active_save_path).filename().string();
+        for (std::size_t i = 0; i < fn.size() && i < 64; ++i) {
+            m.wr8(m.cpu.s[3], static_cast<std::uint16_t>(0xc5c2 + i), static_cast<std::uint8_t>(fn[i]));
+        }
+        m.wr8(m.cpu.s[3], static_cast<std::uint16_t>(0xc5c2 + std::min<std::size_t>(fn.size(), 64)), 0);
+        return 1;  // Save
+#else
+        (void)app;
+        (void)m;
+        return 0;
+#endif
+    };
     if (!app.smoke) app.machine->start_title_intro();
 #endif
+}
+
+bool save_game_synchronously(App& app, const std::string& path) {
+    if (!app.machine || !app.machine->is_in_game()) return false;
+    app.active_save_path = path;
+    app.machine->set_active_save_path(path);
+    app.force_save_as = false;
+    app.machine->trigger_save();
+    for (int i = 0; i < 50; ++i) {
+        app.machine->run(100'000, app.emulated_now_ms);
+        if (!app.machine->has_unsaved_progress()) {
+            return true;
+        }
+    }
+    return !app.machine->has_unsaved_progress();
 }
 
 bool confirm_unsaved_changes(App& app, const char* action_message) {
@@ -274,7 +320,22 @@ bool confirm_unsaved_changes(App& app, const char* action_message) {
     }
 #if defined(__APPLE__) && !defined(__EMSCRIPTEN__)
     auto res = chq::macos::prompt_unsaved_changes_alert(action_message);
-    return res == chq::macos::UnsavedPromptResult::DontSave;
+    if (res == chq::macos::UnsavedPromptResult::DontSave) {
+        return true;
+    }
+    if (res == chq::macos::UnsavedPromptResult::Cancel) {
+        return false;
+    }
+    if (!app.active_save_path.empty()) {
+        return save_game_synchronously(app, app.active_save_path);
+    } else {
+        char chosen[1024] = {0};
+        const char* def_dir = app.default_save_dir.empty() ? nullptr : app.default_save_dir.c_str();
+        if (chq::macos::prompt_save_as_panel(chosen, sizeof(chosen), def_dir, "CHQ-00.SG")) {
+            return save_game_synchronously(app, chosen);
+        }
+        return false;
+    }
 #else
     (void)action_message;
     return true;
@@ -349,6 +410,10 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     }
 #endif
 
+    if (!headless) {
+        SDL_HideCursor();
+    }
+
     app->texture = SDL_CreateTexture(app->renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
                                      chq::dos::Ega::kWidth, chq::dos::Ega::kHeight);
     SDL_SetTextureScaleMode(app->texture, SDL_SCALEMODE_PIXELART);
@@ -414,6 +479,18 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
         callbacks.step_frame = [](void* ctx) {
             step_app_frame(*static_cast<App*>(ctx));
         };
+        callbacks.can_save = [](void* ctx) -> bool {
+            auto* a = static_cast<App*>(ctx);
+            return a->machine && a->machine->is_in_game();
+        };
+        callbacks.has_active_save = [](void* ctx) -> bool {
+            auto* a = static_cast<App*>(ctx);
+            return !a->active_save_path.empty();
+        };
+        callbacks.get_active_save_path = [](void* ctx) -> const char* {
+            auto* a = static_cast<App*>(ctx);
+            return a->active_save_path.empty() ? nullptr : a->active_save_path.c_str();
+        };
         callbacks.has_unsaved_progress = [](void* ctx) -> bool {
             auto* a = static_cast<App*>(ctx);
             return a->machine && a->machine->has_unsaved_progress();
@@ -421,6 +498,25 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
         callbacks.confirm_unsaved_changes = [](void* ctx, const char* action) -> bool {
             auto* a = static_cast<App*>(ctx);
             return confirm_unsaved_changes(*a, action);
+        };
+        callbacks.save_game = [](void* ctx) {
+            auto* a = static_cast<App*>(ctx);
+            if (!a->machine || !a->machine->is_in_game()) return;
+            if (a->active_save_path.empty()) {
+                char chosen[1024] = {0};
+                const char* def_dir = a->default_save_dir.empty() ? nullptr : a->default_save_dir.c_str();
+                if (chq::macos::prompt_save_as_panel(chosen, sizeof(chosen), def_dir, "CHQ-00.SG")) {
+                    save_game_synchronously(*a, chosen);
+                }
+            } else {
+                save_game_synchronously(*a, a->active_save_path);
+            }
+        };
+        callbacks.save_game_as = [](void* ctx, const char* path) {
+            auto* a = static_cast<App*>(ctx);
+            if (path && a->machine && a->machine->is_in_game()) {
+                save_game_synchronously(*a, path);
+            }
         };
         callbacks.new_game = [](void* ctx) {
             auto* a = static_cast<App*>(ctx);
@@ -522,9 +618,29 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
                 start_game(*app);
                 return SDL_APP_CONTINUE;
             }
+            if ((event->key.mod & SDL_KMOD_GUI) && event->key.key == SDLK_S) {
+                if (app->machine && app->machine->is_in_game()) {
+                    if ((event->key.mod & SDL_KMOD_SHIFT) || app->active_save_path.empty()) {
+#if defined(__APPLE__) && !defined(__EMSCRIPTEN__)
+                        char chosen[1024] = {0};
+                        const char* def_dir = app->default_save_dir.empty() ? nullptr : app->default_save_dir.c_str();
+                        const char* active = app->active_save_path.empty() ? nullptr : app->active_save_path.c_str();
+                        std::string def_name = active ? fs::path(active).filename().string() : "CHQ-00.SG";
+                        if (chq::macos::prompt_save_as_panel(chosen, sizeof(chosen), def_dir, def_name.c_str())) {
+                            save_game_synchronously(*app, chosen);
+                        }
+#endif
+                    } else {
+                        save_game_synchronously(*app, app->active_save_path);
+                    }
+                }
+                return SDL_APP_CONTINUE;
+            }
             if (!app->machine) return event->key.key == SDLK_ESCAPE ? SDL_APP_SUCCESS : SDL_APP_CONTINUE;
             if (event->key.mod & SDL_KMOD_GUI) return SDL_APP_CONTINUE;
-            if (auto k = chq::host_key(event->key.key, event->key.mod)) app->machine->key_down(k->scan, k->ascii);
+            if (auto k = chq::host_key(event->key.key, event->key.mod, event->key.scancode)) {
+                app->machine->key_down(k->scan, k->ascii);
+            }
         }
     }
     return SDL_APP_CONTINUE;

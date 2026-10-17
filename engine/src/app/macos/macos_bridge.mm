@@ -1,6 +1,7 @@
 #import <Cocoa/Cocoa.h>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 
 #if defined(__clang__)
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -20,7 +21,6 @@ static NSString* const kPrefAutoSubmitManualWord = @"AutoSubmitManualWord";
 @property (nonatomic, strong, nullable) NSWindow* settingsWindow;
 @property (nonatomic, strong, nullable) NSButton* fullScreenCheckbox;
 @property (nonatomic, strong, nullable) NSButton* prefillManualWordCheckbox;
-@property (nonatomic, strong, nullable) NSButton* autoSubmitManualWordCheckbox;
 @property (nonatomic, strong, nullable) NSButton* settingsMuteCheckbox;
 @property (nonatomic, strong, nullable) NSSlider* settingsVolumeSlider;
 @property (nonatomic, strong, nullable) NSTextField* settingsVolumeLabel;
@@ -45,8 +45,11 @@ static NSString* const kPrefAutoSubmitManualWord = @"AutoSubmitManualWord";
 - (void)stopMenuTrackingTimer;
 
 - (void)newGame:(nullable id)sender;
+- (void)saveGame:(nullable id)sender;
+- (void)saveGameAs:(nullable id)sender;
 - (void)openGame:(nullable id)sender;
 - (void)revealSavesFolder:(nullable id)sender;
+- (BOOL)validateMenuItem:(NSMenuItem*)item;
 
 @end
 
@@ -66,10 +69,6 @@ static ChqMacAppController* s_controller = nil;
     const BOOL prefillVal = (prefillObj != nil) ? [prefillObj boolValue] : YES;
     self.prefillManualWordCheckbox.state = prefillVal ? NSControlStateValueOn : NSControlStateValueOff;
 
-    const BOOL autoSubVal = [[NSUserDefaults standardUserDefaults] boolForKey:kPrefAutoSubmitManualWord];
-    self.autoSubmitManualWordCheckbox.state = autoSubVal ? NSControlStateValueOn : NSControlStateValueOff;
-    self.autoSubmitManualWordCheckbox.enabled = prefillVal;
-
     float vol = 1.0f;
     bool muted = false;
     if (self.callbacks.get_volume) vol = self.callbacks.get_volume(self.callbacks.context);
@@ -81,7 +80,7 @@ static ChqMacAppController* s_controller = nil;
 }
 
 - (void)buildSettingsWindow {
-    const NSRect frame = NSMakeRect(0, 0, 460, 340);
+    const NSRect frame = NSMakeRect(0, 0, 460, 295);
     NSWindow* win = [[NSWindow alloc] initWithContentRect:frame
                                                 styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable)
                                                   backing:NSBackingStoreBuffered
@@ -97,13 +96,13 @@ static ChqMacAppController* s_controller = nil;
     // --- Startup & Display Section ---
     NSTextField* displayHeader = [NSTextField labelWithString:@"Startup & Display"];
     displayHeader.font = [NSFont boldSystemFontOfSize:13];
-    displayHeader.frame = NSMakeRect(20, 300, 420, 20);
+    displayHeader.frame = NSMakeRect(20, 255, 420, 20);
     [content addSubview:displayHeader];
 
     NSButton* fsCheck = [NSButton checkboxWithTitle:@"Open in Full Screen by default"
                                              target:self
                                              action:@selector(fullScreenCheckboxChanged:)];
-    fsCheck.frame = NSMakeRect(30, 272, 400, 24);
+    fsCheck.frame = NSMakeRect(30, 227, 400, 24);
     const BOOL fsVal = [[NSUserDefaults standardUserDefaults] boolForKey:kPrefFullScreenByDefault];
     fsCheck.state = fsVal ? NSControlStateValueOn : NSControlStateValueOff;
     [content addSubview:fsCheck];
@@ -112,66 +111,56 @@ static ChqMacAppController* s_controller = nil;
     NSTextField* fsHint = [NSTextField labelWithString:@"When enabled, Command HQ opens directly into full screen upon launch."];
     fsHint.font = [NSFont systemFontOfSize:11];
     fsHint.textColor = [NSColor secondaryLabelColor];
-    fsHint.frame = NSMakeRect(48, 255, 390, 16);
+    fsHint.frame = NSMakeRect(48, 210, 390, 16);
     [content addSubview:fsHint];
 
     // Separator line 1
-    NSBox* separator1 = [[NSBox alloc] initWithFrame:NSMakeRect(20, 242, 420, 1)];
+    NSBox* separator1 = [[NSBox alloc] initWithFrame:NSMakeRect(20, 197, 420, 1)];
     separator1.boxType = NSBoxSeparator;
     [content addSubview:separator1];
 
     // --- Copy Protection & Startup Section ---
     NSTextField* gameHeader = [NSTextField labelWithString:@"Manual Verification Prompt"];
     gameHeader.font = [NSFont boldSystemFontOfSize:13];
-    gameHeader.frame = NSMakeRect(20, 212, 420, 20);
+    gameHeader.frame = NSMakeRect(20, 167, 420, 20);
     [content addSubview:gameHeader];
 
     NSButton* prefillCheck = [NSButton checkboxWithTitle:@"Auto-fill manual verification word on startup"
                                                   target:self
                                                   action:@selector(prefillManualWordCheckboxChanged:)];
-    prefillCheck.frame = NSMakeRect(30, 184, 400, 24);
+    prefillCheck.frame = NSMakeRect(30, 139, 400, 24);
     id prefillObj = [[NSUserDefaults standardUserDefaults] objectForKey:kPrefPrefillManualWord];
     const BOOL prefillVal = (prefillObj != nil) ? [prefillObj boolValue] : YES;
     prefillCheck.state = prefillVal ? NSControlStateValueOn : NSControlStateValueOff;
     [content addSubview:prefillCheck];
     self.prefillManualWordCheckbox = prefillCheck;
 
-    NSTextField* prefillHint = [NSTextField labelWithString:@"Pre-fills the full manual word in the prompt box so pressing Return continues."];
+    NSTextField* prefillHint = [NSTextField labelWithString:@"Pre-fills the correct word in the verification prompt so pressing Return continues."];
     prefillHint.font = [NSFont systemFontOfSize:11];
     prefillHint.textColor = [NSColor secondaryLabelColor];
-    prefillHint.frame = NSMakeRect(48, 167, 390, 16);
+    prefillHint.frame = NSMakeRect(48, 122, 390, 16);
     [content addSubview:prefillHint];
 
-    NSButton* autoSubmitCheck = [NSButton checkboxWithTitle:@"Auto-submit manual word without waiting for Return"
-                                                     target:self
-                                                     action:@selector(autoSubmitManualWordCheckboxChanged:)];
-    autoSubmitCheck.frame = NSMakeRect(30, 138, 400, 24);
-    const BOOL autoSubVal = [[NSUserDefaults standardUserDefaults] boolForKey:kPrefAutoSubmitManualWord];
-    autoSubmitCheck.state = autoSubVal ? NSControlStateValueOn : NSControlStateValueOff;
-    autoSubmitCheck.enabled = prefillVal;
-    [content addSubview:autoSubmitCheck];
-    self.autoSubmitManualWordCheckbox = autoSubmitCheck;
-
     // Separator line 2
-    NSBox* separator2 = [[NSBox alloc] initWithFrame:NSMakeRect(20, 122, 420, 1)];
+    NSBox* separator2 = [[NSBox alloc] initWithFrame:NSMakeRect(20, 107, 420, 1)];
     separator2.boxType = NSBoxSeparator;
     [content addSubview:separator2];
 
     // --- Audio Section ---
     NSTextField* audioHeader = [NSTextField labelWithString:@"Game Audio"];
     audioHeader.font = [NSFont boldSystemFontOfSize:13];
-    audioHeader.frame = NSMakeRect(20, 92, 420, 20);
+    audioHeader.frame = NSMakeRect(20, 77, 420, 20);
     [content addSubview:audioHeader];
 
     NSButton* muteCheck = [NSButton checkboxWithTitle:@"Mute sound"
                                                target:self
                                                action:@selector(settingsMuteCheckboxChanged:)];
-    muteCheck.frame = NSMakeRect(30, 62, 120, 24);
+    muteCheck.frame = NSMakeRect(30, 47, 120, 24);
     [content addSubview:muteCheck];
     self.settingsMuteCheckbox = muteCheck;
 
     NSTextField* volTitle = [NSTextField labelWithString:@"Volume:"];
-    volTitle.frame = NSMakeRect(160, 66, 60, 18);
+    volTitle.frame = NSMakeRect(160, 51, 60, 18);
     [content addSubview:volTitle];
 
     NSSlider* slider = [NSSlider sliderWithValue:1.0
@@ -179,13 +168,13 @@ static ChqMacAppController* s_controller = nil;
                                         maxValue:1.0
                                           target:self
                                           action:@selector(settingsVolumeSliderChanged:)];
-    slider.frame = NSMakeRect(220, 64, 140, 20);
+    slider.frame = NSMakeRect(220, 49, 140, 20);
     slider.continuous = YES;
     [content addSubview:slider];
     self.settingsVolumeSlider = slider;
 
     NSTextField* volVal = [NSTextField labelWithString:@"100%"];
-    volVal.frame = NSMakeRect(370, 66, 50, 18);
+    volVal.frame = NSMakeRect(370, 51, 50, 18);
     [content addSubview:volVal];
     self.settingsVolumeLabel = volVal;
 
@@ -195,16 +184,6 @@ static ChqMacAppController* s_controller = nil;
 - (void)prefillManualWordCheckboxChanged:(NSButton*)sender {
     const BOOL enabled = (sender.state == NSControlStateValueOn);
     [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:kPrefPrefillManualWord];
-    [[NSUserDefaults standardUserDefaults] synchronize];
-    self.autoSubmitManualWordCheckbox.enabled = enabled;
-    if (self.callbacks.sync_startup_settings) {
-        self.callbacks.sync_startup_settings(self.callbacks.context);
-    }
-}
-
-- (void)autoSubmitManualWordCheckboxChanged:(NSButton*)sender {
-    const BOOL enabled = (sender.state == NSControlStateValueOn);
-    [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:kPrefAutoSubmitManualWord];
     [[NSUserDefaults standardUserDefaults] synchronize];
     if (self.callbacks.sync_startup_settings) {
         self.callbacks.sync_startup_settings(self.callbacks.context);
@@ -301,6 +280,8 @@ static ChqMacAppController* s_controller = nil;
         @"  Function Keys / Menus:  Access Map Mode, Intel, Economic & Replay views\n\n"
         @"Application Shortcuts:\n"
         @"  Cmd+N       Restart Game\n"
+        @"  Cmd+S       Save Game\n"
+        @"  Cmd+Shift+S Save Game As…\n"
         @"  Cmd+O       Import / Open Saved Game (CHQ-xx.SG)\n"
         @"  Cmd+Shift+O Reveal Saves Folder in Finder\n"
         @"  Cmd+Q       Quit application\n"
@@ -308,7 +289,8 @@ static ChqMacAppController* s_controller = nil;
         @"  Cmd+,       Open Settings\n"
         @"  Cmd+Shift+M Toggle Sound Mute\n"
         @"  Cmd+=       Increase Sound Volume\n"
-        @"  Cmd+-       Decrease Sound Volume\n";
+        @"  Cmd+-       Decrease Sound Volume\n"
+        @"  Option+P    Pause / Unpause Game (Alt+P)\n";
 
     if (self.callbacks.get_doc_text) {
         const char* doc = self.callbacks.get_doc_text(self.callbacks.context);
@@ -458,6 +440,36 @@ static ChqMacAppController* s_controller = nil;
     }
 }
 
+- (void)saveGame:(nullable id)sender {
+    (void)sender;
+    if (self.callbacks.save_game) {
+        self.callbacks.save_game(self.callbacks.context);
+    }
+}
+
+- (void)saveGameAs:(nullable id)sender {
+    (void)sender;
+    char chosen[1024] = {0};
+    const char* def_dir = self.callbacks.get_default_save_dir ? self.callbacks.get_default_save_dir(self.callbacks.context) : nullptr;
+    const char* active = self.callbacks.get_active_save_path ? self.callbacks.get_active_save_path(self.callbacks.context) : nullptr;
+    std::string def_name = active ? std::filesystem::path(active).filename().string() : "CHQ-00.SG";
+    if (chq::macos::prompt_save_as_panel(chosen, sizeof(chosen), def_dir, def_name.c_str())) {
+        if (self.callbacks.save_game_as) {
+            self.callbacks.save_game_as(self.callbacks.context, chosen);
+        }
+    }
+}
+
+- (BOOL)validateMenuItem:(NSMenuItem*)item {
+    if (item.action == @selector(saveGame:) || item.action == @selector(saveGameAs:)) {
+        if (self.callbacks.can_save) {
+            return self.callbacks.can_save(self.callbacks.context) ? YES : NO;
+        }
+        return NO;
+    }
+    return YES;
+}
+
 - (void)revealSavesFolder:(nullable id)sender {
     (void)sender;
     if (self.callbacks.get_default_save_dir) {
@@ -560,6 +572,22 @@ void setup_macos_app(SDL_Window* window, const SoundBridgeCallbacks& callbacks) 
         NSInteger fileIdx = [mainMenu indexOfItemWithTitle:@"File"];
         if (fileIdx < 0) {
             NSMenu* fileMenu = [[NSMenu alloc] initWithTitle:@"File"];
+
+            NSMenuItem* saveItem = [[NSMenuItem alloc] initWithTitle:@"Save Game"
+                                                              action:@selector(saveGame:)
+                                                       keyEquivalent:@"s"];
+            saveItem.keyEquivalentModifierMask = NSEventModifierFlagCommand;
+            saveItem.target = s_controller;
+            [fileMenu addItem:saveItem];
+
+            NSMenuItem* saveAsItem = [[NSMenuItem alloc] initWithTitle:@"Save Game As…"
+                                                                action:@selector(saveGameAs:)
+                                                         keyEquivalent:@"S"];
+            saveAsItem.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
+            saveAsItem.target = s_controller;
+            [fileMenu addItem:saveAsItem];
+
+            [fileMenu addItem:[NSMenuItem separatorItem]];
 
             NSMenuItem* newItem = [[NSMenuItem alloc] initWithTitle:@"Restart Game"
                                                              action:@selector(newGame:)
@@ -722,26 +750,61 @@ void show_help_window() {
     }
 }
 
+bool prompt_save_as_panel(char* out_path, std::size_t max_len, const char* default_dir, const char* default_name) {
+    if (!out_path || max_len == 0) return false;
+    @autoreleasepool {
+        NSSavePanel* panel = [NSSavePanel savePanel];
+        panel.title = @"Save Game";
+        panel.message = @"Choose a name and location to save your game:";
+        panel.allowedFileTypes = @[ @"sg", @"SG" ];
+        panel.allowsOtherFileTypes = YES;
+        panel.canCreateDirectories = YES;
+
+        if (default_dir && default_dir[0]) {
+            panel.directoryURL = [NSURL fileURLWithPath:[NSString stringWithUTF8String:default_dir]];
+        }
+        if (default_name && default_name[0]) {
+            panel.nameFieldStringValue = [NSString stringWithUTF8String:default_name];
+        } else {
+            panel.nameFieldStringValue = @"CHQ-00.SG";
+        }
+
+        if ([panel runModal] == NSModalResponseOK) {
+            NSString* path = panel.URL.path;
+            if (path.length > 0) {
+                std::strncpy(out_path, [path UTF8String], max_len - 1);
+                out_path[max_len - 1] = '\0';
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
 UnsavedPromptResult prompt_unsaved_changes_alert(const char* action_message) {
     @autoreleasepool {
         NSAlert* alert = [[NSAlert alloc] init];
         if (action_message && action_message[0]) {
             alert.messageText = [NSString stringWithUTF8String:action_message];
         } else {
-            alert.messageText = @"Are you sure you want to leave the current game?";
+            alert.messageText = @"Do you want to save the changes you made to this game?";
         }
-        alert.informativeText = @"Any unsaved progress since your last in-game save will be lost.";
+        alert.informativeText = @"Your progress will be lost if you don't save.";
         alert.alertStyle = NSAlertStyleWarning;
 
-        [alert addButtonWithTitle:@"Continue"];
-        [alert addButtonWithTitle:@"Cancel"];
+        [alert addButtonWithTitle:@"Save"];       // First button -> NSAlertFirstButtonReturn
+        [alert addButtonWithTitle:@"Cancel"];     // Second button -> NSAlertSecondButtonReturn
+        [alert addButtonWithTitle:@"Don't Save"]; // Third button -> NSAlertThirdButtonReturn
 
-        if (alert.buttons.count >= 2) {
+        if (alert.buttons.count >= 3) {
             [alert.buttons[1] setKeyEquivalent:@"\033"];
+            [alert.buttons[2] setKeyEquivalent:@"d"];
+            [alert.buttons[2] setKeyEquivalentModifierMask:NSEventModifierFlagCommand];
         }
 
         NSModalResponse res = [alert runModal];
-        if (res == NSAlertFirstButtonReturn) return UnsavedPromptResult::DontSave;
+        if (res == NSAlertFirstButtonReturn) return UnsavedPromptResult::Save;
+        if (res == NSAlertThirdButtonReturn) return UnsavedPromptResult::DontSave;
         return UnsavedPromptResult::Cancel;
     }
 }
