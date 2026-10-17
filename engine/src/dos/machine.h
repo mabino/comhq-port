@@ -320,6 +320,8 @@ private:
     bool pit_read_hi_ = false;
     std::uint16_t pit0_divisor_ = 0;
     std::uint16_t pit2_divisor_ = 0;
+    double next_pit0_ms_ = -1.0;
+    bool pit0_irq_pending_ = false;
     std::uint8_t port61_ = 0;
     std::uint16_t pit_counter_ = 0xFFFF;
     bool refresh_ = false;

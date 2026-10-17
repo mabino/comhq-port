@@ -28,8 +28,40 @@ static bool save_bmp(chq::dos::Machine& m, const std::string& path) {
     return ok;
 }
 
+static bool save_wav(const std::string& path, const std::vector<float>& samples, int sample_rate) {
+    std::FILE* fp = std::fopen(path.c_str(), "wb");
+    if (!fp) return false;
+    std::uint32_t data_bytes = static_cast<std::uint32_t>(samples.size() * 2);
+    std::uint32_t riff_bytes = 36 + data_bytes;
+    std::uint32_t rate = sample_rate;
+    std::uint32_t byte_rate = rate * 2;
+    std::uint16_t block_align = 2;
+    std::uint16_t bits = 16;
+    std::uint16_t format = 1;
+    std::uint16_t channels = 1;
+    std::uint32_t fmt_len = 16;
+    std::fwrite("RIFF", 1, 4, fp);
+    std::fwrite(&riff_bytes, 4, 1, fp);
+    std::fwrite("WAVEfmt ", 1, 8, fp);
+    std::fwrite(&fmt_len, 4, 1, fp);
+    std::fwrite(&format, 2, 1, fp);
+    std::fwrite(&channels, 2, 1, fp);
+    std::fwrite(&rate, 4, 1, fp);
+    std::fwrite(&byte_rate, 4, 1, fp);
+    std::fwrite(&block_align, 2, 1, fp);
+    std::fwrite(&bits, 2, 1, fp);
+    std::fwrite("data", 1, 4, fp);
+    std::fwrite(&data_bytes, 4, 1, fp);
+    for (float s : samples) {
+        std::int16_t pcm = static_cast<std::int16_t>(std::clamp(s, -1.0f, 1.0f) * 32767.0f);
+        std::fwrite(&pcm, 2, 1, fp);
+    }
+    std::fclose(fp);
+    return true;
+}
+
 int main(int argc, char** argv) {
-    std::string keys, shot, shots_dir, save_dir = (fs::temp_directory_path() / "comhq-headless").string();
+    std::string keys, shot, shots_dir, wav_path, save_dir = (fs::temp_directory_path() / "comhq-headless").string();
     long frames = 600, every = 0, budget = 65536;
     bool trace = false, verbose = false, title_intro = false;
     std::string dump, watch;
@@ -47,6 +79,7 @@ int main(int argc, char** argv) {
         else if (std::strcmp(argv[i], "--title-intro") == 0) title_intro = true;
         else if (arg("--dump-interpreted")) dump = argv[++i];
         else if (arg("--watch")) watch = argv[++i];
+        else if (arg("--wav")) wav_path = argv[++i];
         else {
             std::fprintf(stderr, "unknown argument %s\n", argv[i]);
             return 2;
@@ -67,6 +100,7 @@ int main(int argc, char** argv) {
     std::size_t next_key = 0;
     int idle = 0;
     double now = 0;
+    std::vector<float> audio_samples;
     for (long f = 0; f < frames; ++f) {
         m.set_clock_override(now);
         const auto state = m.run(budget, now);
@@ -100,8 +134,10 @@ int main(int argc, char** argv) {
         }
         if (every > 0 && !shots_dir.empty() && f % every == 0)
             save_bmp(m, (fs::path(shots_dir) / ("frame" + std::to_string(f) + ".bmp")).string());
+        m.speaker().render(audio_samples, 44100, now);
     }
     if (!shot.empty()) save_bmp(m, shot);
+    if (!wav_path.empty()) save_wav(wav_path, audio_samples, 44100);
     std::printf("blocks run: %llu, keys used: %zu/%zu, video mode %02Xh, pc %05X\n",
                 static_cast<unsigned long long>(m.blocks_run()), next_key, script.size(), m.ega().mode(), m.cpu.pc);
     if (trace) {

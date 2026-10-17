@@ -166,3 +166,87 @@ TEST_CASE("PC speaker: PIT channel 2 square wave while port 61h enables it") {
     for (std::size_t i = 1; i < out.size(); ++i) sign_changes += (out[i] > 0) != (out[i - 1] > 0);
     CHECK(sign_changes >= 18);
 }
+
+TEST_CASE("PIT channel 0: custom frequency delivery and BIOS INT 08h chaining") {
+    // Hook INT 08h to CS:0040h.
+    // At CS:0040h:
+    //   inc word ptr cs:[0100h]   (count ticks)
+    //   dec byte ptr cs:[0102h]
+    //   jnz not_13
+    //   mov byte ptr cs:[0102h], 13
+    //   jmp far cs:[0104h]        (chain to BIOS stub at F000:0120)
+    // not_13:
+    //   push ax ; mov al, 20h ; out 20h, al ; pop ax ; iret
+    // Main code at CS:0000h:
+    //   Save old INT 08h to cs:[0104h]
+    //   Set INT 08h vector to CS:0040h
+    //   Reprogram PIT0 divisor to 5041 (13B1h)
+    //   Loop (jmp $)
+    std::vector<std::uint8_t> code(0x200, 0);
+    // Main:
+    // xor ax, ax ; mov es, ax
+    // mov bx, es:[0020h] ; mov cs:[0104h], bx
+    // mov bx, es:[0022h] ; mov cs:[0106h], bx
+    // mov es:[0020h], 0040h
+    // mov es:[0022h], cs
+    // mov al, 36h ; out 43h, al
+    // mov al, b1h ; out 40h, al
+    // mov al, 13h ; out 40h, al
+    // mov byte ptr cs:[0102h], 13
+    // loop: jmp loop
+    const std::vector<std::uint8_t> main_bytes = {
+        0x31, 0xC0, 0x8E, 0xC0,                          // xor ax, ax ; mov es, ax
+        0x26, 0x8B, 0x1E, 0x20, 0x00,                    // mov bx, es:[0020h]
+        0x2E, 0x89, 0x1E, 0x04, 0x01,                    // mov cs:[0104h], bx
+        0x26, 0x8B, 0x1E, 0x22, 0x00,                    // mov bx, es:[0022h]
+        0x2E, 0x89, 0x1E, 0x06, 0x01,                    // mov cs:[0106h], bx
+        0x26, 0xC7, 0x06, 0x20, 0x00, 0x40, 0x00,        // mov word ptr es:[0020h], 0040h
+        0x8C, 0xC8, 0x26, 0x89, 0x06, 0x22, 0x00,        // mov ax, cs ; mov es:[0022h], ax
+        0xB0, 0x36, 0xE6, 0x43,                          // mov al, 36h ; out 43h, al
+        0xB0, 0xB1, 0xE6, 0x40,                          // mov al, B1h ; out 40h, al
+        0xB0, 0x13, 0xE6, 0x40,                          // mov al, 13h ; out 40h, al
+        0x2E, 0xC6, 0x06, 0x02, 0x01, 0x0D,              // mov byte ptr cs:[0102h], 0Dh
+        0xFB,                                            // sti
+        0xEB, 0xFE,                                      // jmp $
+    };
+    std::copy(main_bytes.begin(), main_bytes.end(), code.begin());
+
+    // Handler at 0x40:
+    // 2E FF 06 00 01       inc word ptr cs:[0100h]
+    // 2E FE 0E 02 01       dec byte ptr cs:[0102h]
+    // 75 0C                jnz not_13
+    // 2E C6 06 02 01 0D    mov byte ptr cs:[0102h], 0Dh
+    // 2E FF 2E 04 01       jmp far ptr cs:[0104h]
+    // not_13:
+    // 50                   push ax
+    // B0 20                mov al, 20h
+    // E6 20                out 20h, al
+    // 58                   pop ax
+    // CF                   iret
+    const std::vector<std::uint8_t> handler_bytes = {
+        0x2E, 0xFF, 0x06, 0x00, 0x01,
+        0x2E, 0xFE, 0x0E, 0x02, 0x01,
+        0x75, 0x0B,
+        0x2E, 0xC6, 0x06, 0x02, 0x01, 0x0D,
+        0x2E, 0xFF, 0x2E, 0x04, 0x01,
+        0x50, 0xB0, 0x20, 0xE6, 0x20, 0x58, 0xCF
+    };
+    std::copy(handler_bytes.begin(), handler_bytes.end(), code.begin() + 0x40);
+
+    Prog p(code);
+    Machine m(p.program, {});
+    m.set_clock_override(0.0);
+    m.run(10000, 0.0);
+
+    // Run for 100 milliseconds at 236.7 Hz -> should receive ~23-24 ticks.
+    // Tick 13 chains to BIOS stub; subsequent ticks must continue to arrive.
+    for (int frame = 1; frame <= 6; ++frame) {
+        const double ms = frame * (1000.0 / 60.0);
+        m.set_clock_override(ms);
+        m.run(10000, ms);
+    }
+    const std::uint16_t tick_count = m.rd16(p.program.load_segment, 0x0100);
+    CHECK(tick_count >= 22);
+    CHECK(tick_count <= 26);
+}
+

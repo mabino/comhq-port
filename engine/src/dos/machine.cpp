@@ -135,6 +135,8 @@ void Machine::reset() {
     sub_slices_ = 0;
     prev_now_ms_ = 0;
     sub_now_ms_ = 0;
+    next_pit0_ms_ = -1.0;
+    pit0_irq_pending_ = false;
     mouse_x_ = 160;
     mouse_y_ = 100;
     mouse_buttons_ = 0;
@@ -213,11 +215,12 @@ Machine::State Machine::run(std::int64_t slice, double now_ms) {
         while (budget >= 0 && state_ == State::Running) {
             const std::uint32_t pc = cpu.pc;
             if (pc >= stub_lo && pc < stub_hi) {
-                if (--budget < 0) break;
+                --budget;
                 if (!run_stub(static_cast<int>((pc - stub_lo) / 4))) {
                     remaining = 0;
                     break;
                 }
+                if (budget < 0) break;
                 continue;
             }
             if (!in_title_intro_) {
@@ -347,7 +350,11 @@ bool Machine::run_stub(int n) {
             if (just_chained_intro_) return true;
             break;
         case 0x33: done = int33(); break;
-        case 0x05: case 0x08: case 0x09: case 0x1B: case 0x1C: case 0x23: case 0x24: case 0x28: case 0x2F:
+        case 0x08:
+        case 0x09:
+            pic_in_service_ = false;
+            break;
+        case 0x05: case 0x1B: case 0x1C: case 0x23: case 0x24: case 0x28: case 0x2F:
             break;
         default:
             if (warned_.insert(0x1000 + n).second) SDL_Log("unhandled INT %02Xh AX=%04X", n, cpu.r[AX]);
@@ -385,32 +392,62 @@ void Machine::sync_ticks() {
 }
 
 void Machine::deliver_hardware() {
-    if (!cpu.ifl || pic_in_service_ || (!in_title_intro_ && !is_block(cpu.pc) && cpu.pc < 0x60000)) return;
+    const std::uint32_t stub_lo = lin(kBiosSeg, kStubBase), stub_hi = stub_lo + 4 * 256;
+    const bool in_stub = cpu.pc >= stub_lo && cpu.pc < stub_hi;
+
     // 1. Deliver pending XT scancode to INT 09h when hooked (1786:00AD).
-    if (!scancodes_.empty() && rd16(0, 0x09 * 4 + 2) != kBiosSeg) {
+    if (!scancodes_.empty() && rd16(0, 0x09 * 4 + 2) != kBiosSeg && cpu.ifl && !pic_in_service_ && !in_stub) {
         port60_ = scancodes_.front();
         scancodes_.pop_front();
         pic_in_service_ = true;
         interrupt(0x09, cpu.pc);
         return;
     }
-    // 2. Deliver PIT timer tick (INT 08h at 24B0:01A6, 236.7 Hz -> 4 ticks per 60 Hz frame).
-    if ((sub_slices_ & 63) == 1) {
-        if (deterministic_ticks_) {
+
+    // 2. Deliver PIT timer tick (INT 08h or INT 1Ch).
+    const auto hooked = [this](int n) {
+        return rd16(0, static_cast<std::uint16_t>(n * 4 + 2)) != kBiosSeg;
+    };
+
+    if (deterministic_ticks_) {
+        if ((sub_slices_ & 63) == 1) {
             ++ticks_;
             std::memcpy(&mem_[0x46C], &ticks_, 4);
-        } else {
-            sync_ticks();
+            if (cpu.ifl && !pic_in_service_ && !in_stub &&
+                (in_title_intro_ || interpret_only_ || program_.segments.empty() || is_block(cpu.pc) || cpu.pc >= 0x60000)) {
+                if (hooked(0x08)) {
+                    pic_in_service_ = true;
+                    interrupt(0x08, cpu.pc);
+                } else if (hooked(0x1C)) {
+                    pic_in_service_ = true;
+                    interrupt(0x1C, cpu.pc);
+                }
+            }
         }
-        const auto hooked = [this](int n) {
-            return rd16(0, static_cast<std::uint16_t>(n * 4 + 2)) != kBiosSeg;
-        };
-        if (hooked(0x08)) {
-            pic_in_service_ = true;
-            interrupt(0x08, cpu.pc);
-        } else if (hooked(0x1C)) {
-            pic_in_service_ = true;
-            interrupt(0x1C, cpu.pc);
+    } else {
+        sync_ticks();
+        const std::uint32_t div = pit0_divisor_ ? pit0_divisor_ : 65536;
+        const double period_ms = 1000.0 / (Speaker::kPitHz / div);
+        if (next_pit0_ms_ < 0.0) {
+            next_pit0_ms_ = sub_now_ms_ + period_ms;
+        }
+        if (sub_now_ms_ >= next_pit0_ms_) {
+            pit0_irq_pending_ = true;
+            next_pit0_ms_ += period_ms;
+            if (next_pit0_ms_ < sub_now_ms_ - period_ms * 4.0) {
+                next_pit0_ms_ = sub_now_ms_;
+            }
+        }
+        if (pit0_irq_pending_ && cpu.ifl && !pic_in_service_ && !in_stub &&
+            (in_title_intro_ || interpret_only_ || program_.segments.empty() || is_block(cpu.pc) || cpu.pc >= 0x60000)) {
+            pit0_irq_pending_ = false;
+            if (hooked(0x08)) {
+                pic_in_service_ = true;
+                interrupt(0x08, cpu.pc);
+            } else if (hooked(0x1C)) {
+                pic_in_service_ = true;
+                interrupt(0x1C, cpu.pc);
+            }
         }
     }
 }
@@ -537,6 +574,9 @@ void Machine::out8(std::uint16_t port, std::uint8_t v) {
             } else {
                 pit0_divisor_ = static_cast<std::uint16_t>(pit0_latch_lo_ | v << 8);
                 pit0_lo_written_ = false;
+                const std::uint32_t div = pit0_divisor_ ? pit0_divisor_ : 65536;
+                const double period_ms = 1000.0 / (Speaker::kPitHz / div);
+                next_pit0_ms_ = sub_now_ms_ + period_ms;
             }
             break;
         case 0x42:
