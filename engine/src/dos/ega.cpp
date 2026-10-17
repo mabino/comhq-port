@@ -6,7 +6,30 @@
 namespace chq::dos {
 
 namespace {
-constexpr std::uint8_t kDefaultPalette[16] = {0, 1, 2, 3, 4, 5, 20, 7, 56, 57, 58, 59, 60, 61, 62, 63};
+// 200-line EGA default palette registers: colors 0-7, and 16-23 (bit 4 set for intensity).
+constexpr std::uint8_t kDefaultPalette[16] = {0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23};
+
+// 64-entry EGA DAC palette for 200-line modes (Mode 0Dh, 0Eh, and text mode 3).
+// In 200-line EGA/CGA modes, bit 4 acts as the global intensity bit matching
+// the IBM 5153/CGA RGBI standard with the hardware brown fix (color 6 = 0xAA5500).
+constexpr std::array<std::uint32_t, 64> kEgaPalette64 = {
+    // 0x00..0x07 (Standard dark colors)
+    0xFF000000u, 0xFF0000AAu, 0xFF00AA00u, 0xFF00AAAAu, 0xFFAA0000u, 0xFFAA00AAu, 0xFFAA5500u, 0xFFAAAAAAu,
+    // 0x08..0x0F (Alias of dark colors)
+    0xFF000000u, 0xFF0000AAu, 0xFF00AA00u, 0xFF00AAAAu, 0xFFAA0000u, 0xFFAA00AAu, 0xFFAA5500u, 0xFFAAAAAAu,
+    // 0x10..0x17 (Standard bright colors - bit 4 intensity)
+    0xFF555555u, 0xFF5555FFu, 0xFF55FF55u, 0xFF55FFFFu, 0xFFFF5555u, 0xFFFF55FFu, 0xFFFFFF55u, 0xFFFFFFFFu,
+    // 0x18..0x1F (Alias of bright colors)
+    0xFF555555u, 0xFF5555FFu, 0xFF55FF55u, 0xFF55FFFFu, 0xFFFF5555u, 0xFFFF55FFu, 0xFFFFFF55u, 0xFFFFFFFFu,
+    // 0x20..0x27 (Alias of dark colors)
+    0xFF000000u, 0xFF0000AAu, 0xFF00AA00u, 0xFF00AAAAu, 0xFFAA0000u, 0xFFAA00AAu, 0xFFAA5500u, 0xFFAAAAAAu,
+    // 0x28..0x2F (Alias of dark colors)
+    0xFF000000u, 0xFF0000AAu, 0xFF00AA00u, 0xFF00AAAAu, 0xFFAA0000u, 0xFFAA00AAu, 0xFFAA5500u, 0xFFAAAAAAu,
+    // 0x30..0x37 (Alias of bright colors)
+    0xFF555555u, 0xFF5555FFu, 0xFF55FF55u, 0xFF55FFFFu, 0xFFFF5555u, 0xFFFF55FFu, 0xFFFFFF55u, 0xFFFFFFFFu,
+    // 0x38..0x3F (Alias of bright colors - 350-line default indices 56..63)
+    0xFF555555u, 0xFF5555FFu, 0xFF55FF55u, 0xFF55FFFFu, 0xFFFF5555u, 0xFFFF55FFu, 0xFFFFFF55u, 0xFFFFFFFFu,
+};
 
 std::uint8_t rotate_right(std::uint8_t v, int n) {
     n &= 7;
@@ -163,10 +186,7 @@ std::uint8_t Ega::port_in(std::uint16_t port) {
 }
 
 std::uint32_t Ega::rgb(std::uint8_t c) {
-    const auto chan = [c](int primary, int secondary) {
-        return static_cast<std::uint32_t>(((c >> primary) & 1) * 0xAA + ((c >> secondary) & 1) * 0x55);
-    };
-    return 0xFF000000u | chan(2, 5) << 16 | chan(1, 4) << 8 | chan(0, 3);
+    return kEgaPalette64[c & 0x3F];
 }
 
 int Ega::pixel(int x, int y) const {

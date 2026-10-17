@@ -4,6 +4,7 @@
 
 #include "dos/ega.h"
 #include "dos/keymap.h"
+#include "gfx/ega_surface.h"
 
 using chq::dos::Ega;
 
@@ -122,4 +123,34 @@ TEST_CASE("key and mouse scripts") {
     CHECK(keys[13] == BiosKey{0x2D, 'x'});
     CHECK(chq::dos::key_for_char('?')->scan == 0x35);
     CHECK_FALSE(chq::dos::key_for_name("F11").has_value());
+}
+
+TEST_CASE("EGA palette mapping for 200-line modes") {
+    // 200-line EGA palette mappings (CGA compatibility RGBI with brown fix)
+    CHECK(Ega::rgb(0) == 0xFF000000u);     // Black
+    CHECK(Ega::rgb(1) == 0xFF0000AAu);     // Blue
+    CHECK(Ega::rgb(2) == 0xFF00AA00u);     // Green
+    CHECK(Ega::rgb(3) == 0xFF00AAAAu);     // Cyan
+    CHECK(Ega::rgb(4) == 0xFFAA0000u);     // Red
+    CHECK(Ega::rgb(5) == 0xFFAA00AAu);     // Magenta
+    CHECK(Ega::rgb(6) == 0xFFAA5500u);     // Brown
+    CHECK(Ega::rgb(7) == 0xFFAAAAAAu);     // Light Gray
+    CHECK(Ega::rgb(0x10) == 0xFF555555u);  // Dark Gray (bit 4 intensity)
+    CHECK(Ega::rgb(0x11) == 0xFF5555FFu);  // Bright Blue
+    CHECK(Ega::rgb(0x12) == 0xFF55FF55u);  // Bright Green
+    CHECK(Ega::rgb(0x13) == 0xFF55FFFFu);  // Bright Cyan
+    CHECK(Ega::rgb(0x14) == 0xFFFF5555u);  // Bright Red
+    CHECK(Ega::rgb(0x15) == 0xFFFF55FFu);  // Bright Magenta
+    CHECK(Ega::rgb(0x16) == 0xFFFFFF55u);  // Bright Yellow
+    CHECK(Ega::rgb(0x17) == 0xFFFFFFFFu);  // Bright White
+
+    // 350-line default indices 56..63 also map cleanly to the 8 bright colors
+    CHECK(Ega::rgb(56) == 0xFF555555u);
+    CHECK(Ega::rgb(63) == 0xFFFFFFFFu);
+
+    // Default palette registers match standard 16 colors
+    Ega e;
+    for (int i = 0; i < 16; ++i) {
+        CHECK(Ega::rgb(e.palette(i)) == chq::EgaSurface::default_palette()[i]);
+    }
 }
