@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # arm64 Linux is the closest container-friendly stand-in for Apple Silicon.
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build CI image
+        run: docker build -f docker/ci.Dockerfile -t chq-ci docker
+      - name: Test (Python tools + C++ engine)
+        run: |
+          docker run --rm -v "$PWD:/src:ro" chq-ci sh -c '
+            set -e
+            cp -r /src /tmp/w && cd /tmp/w
+            uv --directory tools/chqre run pytest -q
+            cmake --preset linux -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang
+            cmake --build --preset linux
+            ctest --preset linux'
+
+  wasm:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Emscripten image
+        run: docker build -f docker/wasm.Dockerfile -t chq-wasm docker
+      - name: Build and test (Emscripten)
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src -u "$(id -u):$(id -g)" -e HOME=/tmp chq-wasm sh -c '
+            set -e
+            cmake --preset wasm
+            cmake --build --preset wasm -- -j 2
+            node build/wasm/engine/chq_tests.js'

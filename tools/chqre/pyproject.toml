@@ -1,0 +1,26 @@
+[project]
+name = "chqre"
+version = "0.1.0"
+description = "Reverse-engineering and static recompilation tools for Command HQ (1990, Ozark Softscape / MicroProse)"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = [
+    "capstone>=5.0.9",
+]
+
+[project.scripts]
+chqre = "chqre.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "unicorn>=2.1.4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["gamedata: needs the original CHQ.EXE (set CHQ_DATA)"]

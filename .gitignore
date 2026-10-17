@@ -1,0 +1,53 @@
+# Build output
+build/
+build-*/
+dist/
+*.app
+*.dmg
+*.iconset/
+
+# Analysis output (derived from the original game; never commit)
+out/
+ghidra-projects/
+*.gpr
+*.rep/
+
+# Original game files (never commit)
+*.exe
+*.EXE
+*.com
+*.COM
+*.drv
+*.DRV
+*.ovl
+*.OVL
+*.pic
+*.PIC
+*.pan
+*.PAN
+*.dat
+*.DAT
+*.cat
+*.CAT
+*.chq
+*.CHQ
+*.sng
+*.SNG
+*.sg
+*.SG
+*.dt*
+*.DT*
+*.0*
+*.1*
+*.2*
+READ.ME
+read.me
+
+# Python
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+
+# macOS
+.DS_Store
