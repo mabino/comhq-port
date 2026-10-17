@@ -48,3 +48,20 @@ TEST_CASE("install detection") {
     fs::remove(t.root / "Chq.Exe");
     CHECK_FALSE(chq::DataPath::looks_like_install(t.root));
 }
+
+TEST_CASE("find_install scans candidates in order") {
+    TempDir t1;
+    TempDir t2;
+
+    CHECK_FALSE(chq::DataPath::find_install({}).has_value());
+    CHECK_FALSE(chq::DataPath::find_install({"/nonexistent/path/12345", ""}).has_value());
+
+    auto hit = chq::DataPath::find_install({"/nonexistent/path/12345", t1.root, t2.root});
+    REQUIRE(hit.has_value());
+    CHECK(hit->root() == t1.root);
+
+    fs::remove(t1.root / "Chq.Exe");
+    auto hit2 = chq::DataPath::find_install({"/nonexistent/path/12345", t1.root, t2.root});
+    REQUIRE(hit2.has_value());
+    CHECK(hit2->root() == t2.root);
+}

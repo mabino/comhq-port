@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <string>
 
 #if defined(__APPLE__) && !defined(__EMSCRIPTEN__)
@@ -56,6 +57,7 @@ void show_help_window();
 
 UnsavedPromptResult prompt_unsaved_changes_alert(const char* action_message);
 void show_alert(const char* title, const char* message);
+std::optional<std::string> prompt_for_data_folder();
 
 }  // namespace chq::macos
 
@@ -110,6 +112,7 @@ inline void show_help_window() {}
 
 inline UnsavedPromptResult prompt_unsaved_changes_alert(const char*) { return UnsavedPromptResult::DontSave; }
 inline void show_alert(const char*, const char*) {}
+inline std::optional<std::string> prompt_for_data_folder() { return std::nullopt; }
 
 }  // namespace chq::macos
 

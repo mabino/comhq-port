@@ -1,7 +1,6 @@
 #!/usr/bin/env zsh
 # Package the app into dist/ as a signed (ad-hoc unless CHQ_SIGN_IDENTITY is set)
 # application bundle, zip archive, and drag-and-drop disk image (DMG).
-# CHQ.EXE is never bundled: the app reads data files from CHQ_DATA.
 set -euo pipefail
 ROOT=${0:A:h:h}
 
@@ -10,6 +9,27 @@ $ROOT/scripts/build.zsh
 APP="$ROOT/build/macos/engine/Command HQ.app"
 ENTITLEMENTS="$ROOT/engine/resources/comhq.entitlements"
 IDENTITY=${CHQ_SIGN_IDENTITY:--}
+
+DATA_SRC=""
+if [[ -n "${CHQ_DATA:-}" && -f "$CHQ_DATA/CHQ.EXE" ]]; then
+  DATA_SRC="$CHQ_DATA"
+elif [[ -f "$ROOT/../CHQ.EXE" ]]; then
+  DATA_SRC="$ROOT/.."
+fi
+
+if [[ -n "$DATA_SRC" ]]; then
+  rm -rf "$APP/Contents/Resources/data"
+  mkdir -p "$APP/Contents/Resources/data"
+  for f in "$DATA_SRC"/*; do
+    if [[ -f "$f" ]]; then
+      base=${f:t}
+      if [[ "$base" != *copy* && "$base" != *working* && "$base" != *test* && "$base" != .* ]]; then
+        cp -p "$f" "$APP/Contents/Resources/data/"
+      fi
+    fi
+  done
+  chmod -R u+w "$APP/Contents/Resources/data"
+fi
 
 SIGN_ARGS=(--force --deep --options runtime)
 if [[ -f "$ENTITLEMENTS" ]]; then
@@ -22,6 +42,7 @@ else
   SIGN_ARGS+=(--timestamp)
 fi
 
+xattr -cr "$APP"
 codesign "${SIGN_ARGS[@]}" --sign "$IDENTITY" "$APP"
 
 mkdir -p "$ROOT/dist"

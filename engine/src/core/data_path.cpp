@@ -21,6 +21,17 @@ bool iequals(std::string_view a, std::string_view b) {
 
 bool DataPath::looks_like_install(const fs::path& root) { return DataPath(root).resolve("CHQ.EXE").has_value(); }
 
+std::optional<DataPath> DataPath::find_install(const std::vector<fs::path>& candidates) {
+    for (const auto& candidate : candidates) {
+        if (candidate.empty()) continue;
+        std::error_code ec;
+        if (fs::exists(candidate, ec) && looks_like_install(candidate)) {
+            return DataPath(candidate);
+        }
+    }
+    return std::nullopt;
+}
+
 std::optional<DataPath> DataPath::from_environment() {
     const char* env = std::getenv("CHQ_DATA");
     if (!env || !*env) env = std::getenv("COMHQ_DATA");

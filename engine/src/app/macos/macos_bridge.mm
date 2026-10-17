@@ -757,4 +757,26 @@ void show_alert(const char* title, const char* message) {
     }
 }
 
+std::optional<std::string> prompt_for_data_folder() {
+    @autoreleasepool {
+        [NSApp activateIgnoringOtherApps:YES];
+        NSOpenPanel* panel = [NSOpenPanel openPanel];
+        panel.title = @"Locate Command HQ Game Files";
+        panel.message = @"Select the folder containing Command HQ game files (including CHQ.EXE and FONTS.CHQ):";
+        panel.prompt = @"Select";
+        panel.canChooseFiles = NO;
+        panel.canChooseDirectories = YES;
+        panel.allowsMultipleSelection = NO;
+        panel.canCreateDirectories = NO;
+
+        if ([panel runModal] == NSModalResponseOK) {
+            NSString* path = panel.URL.path;
+            if (path.length > 0) {
+                return std::string([path UTF8String]);
+            }
+        }
+        return std::nullopt;
+    }
+}
+
 }  // namespace chq::macos

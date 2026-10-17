@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <optional>
 #include <string_view>
+#include <vector>
 
 namespace chq {
 
@@ -15,6 +16,7 @@ public:
     // Root from $CHQ_DATA (or $COMHQ_DATA), else nullopt. Requires CHQ.EXE to be present.
     static std::optional<DataPath> from_environment();
     static bool looks_like_install(const std::filesystem::path& root);
+    static std::optional<DataPath> find_install(const std::vector<std::filesystem::path>& candidates);
 
     const std::filesystem::path& root() const { return root_; }
 

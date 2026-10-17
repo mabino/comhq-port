@@ -47,6 +47,7 @@ struct App {
     std::vector<std::uint32_t> argb = std::vector<std::uint32_t>(chq::dos::Ega::kWidth * chq::dos::Ega::kHeight);
     std::vector<float> samples;
     chq::SoundState sound;
+    std::string data_dir;
     std::string default_save_dir;
     std::string initial_save_to_load;
     bool smoke = false;          // --smoke: run a few frames and exit (used by tests)
@@ -91,11 +92,97 @@ fs::path save_folder() {
     return fs::temp_directory_path() / "Command HQ";
 }
 
-fs::path data_folder() {
-    if (auto d = chq::DataPath::from_environment()) return d->root();
+fs::path data_folder(App& app) {
+    if (!app.data_dir.empty()) {
+        std::error_code ec;
+        if (fs::exists(app.data_dir, ec) && chq::DataPath::looks_like_install(app.data_dir)) {
+            return app.data_dir;
+        }
+    }
+
+    if (auto d = chq::DataPath::from_environment()) {
+        app.data_dir = d->root().string();
+        return d->root();
+    }
+
 #if defined(__EMSCRIPTEN__)
-    if (chq::DataPath::looks_like_install("/data")) return "/data";
+    if (chq::DataPath::looks_like_install("/data")) {
+        app.data_dir = "/data";
+        return "/data";
+    }
 #endif
+
+    std::vector<fs::path> candidates;
+
+    if (const char* base = SDL_GetBasePath()) {
+        fs::path bp(base);
+        candidates.push_back(bp / "data");
+        candidates.push_back(bp / "Resources" / "data");
+        candidates.push_back(bp / ".." / "Resources" / "data");
+        candidates.push_back(bp / ".." / ".." / "Resources" / "data");
+        candidates.push_back(bp);
+        candidates.push_back(bp / ".." / ".." / "..");
+        candidates.push_back(bp / ".." / ".." / ".." / "..");
+        candidates.push_back(bp / ".." / ".." / ".." / ".." / "..");
+    }
+
+    const fs::path pref_file = save_folder() / "data_path.txt";
+    std::error_code ec;
+    if (fs::is_regular_file(pref_file, ec)) {
+        std::ifstream ifs(pref_file);
+        std::string line;
+        if (std::getline(ifs, line)) {
+            while (!line.empty() && (line.back() == '\r' || line.back() == '\n' || line.back() == ' ' || line.back() == '\t')) {
+                line.pop_back();
+            }
+            while (!line.empty() && (line.front() == ' ' || line.front() == '\t')) {
+                line.erase(line.begin());
+            }
+            if (!line.empty()) {
+                candidates.push_back(line);
+            }
+        }
+    }
+
+    candidates.push_back(fs::current_path());
+    candidates.push_back(fs::current_path() / "..");
+    if (const char* home = std::getenv("HOME")) {
+        fs::path h(home);
+        candidates.push_back(h / "Downloads" / "comhq");
+        candidates.push_back(h / "Downloads" / "Command HQ");
+        candidates.push_back(h / "Games" / "comhq");
+        candidates.push_back(h / "Games" / "Command HQ");
+        candidates.push_back(h / "Applications" / "Command HQ");
+    }
+
+    if (auto hit = chq::DataPath::find_install(candidates)) {
+        app.data_dir = hit->root().string();
+        return hit->root();
+    }
+
+#if defined(__APPLE__) && !defined(__EMSCRIPTEN__)
+    if (!app.smoke && !app.shot) {
+        for (int attempt = 0; attempt < 3; ++attempt) {
+            auto chosen = chq::macos::prompt_for_data_folder();
+            if (!chosen) {
+                break;
+            }
+            fs::path p(*chosen);
+            if (fs::exists(p, ec) && chq::DataPath::looks_like_install(p)) {
+                std::ofstream ofs(pref_file);
+                if (ofs) {
+                    ofs << p.string() << "\n";
+                }
+                app.data_dir = p.string();
+                return p;
+            } else {
+                chq::macos::show_alert("Command HQ Files Not Found",
+                                       "The selected folder does not contain the required Command HQ files (CHQ.EXE was not found).\n\nPlease select the folder containing the original game files.");
+            }
+        }
+    }
+#endif
+
     return {};
 }
 
@@ -155,13 +242,27 @@ void import_save_file(App& app, const fs::path& src) {
 
 void start_game([[maybe_unused]] App& app) {
 #if CHQ_HAVE_GAME
+    const fs::path data = data_folder(app);
+    if (data.empty()) {
+        SDL_Log("Command HQ: game data directory could not be located.");
+        if (!app.smoke && !app.shot) {
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,
+                                     "Command HQ - Game Files Not Found",
+                                     "Command HQ could not find the original game data files (e.g. CHQ.EXE, FONTS.CHQ).\n\n"
+                                     "Please place the game files in ~/Downloads/comhq or set the CHQ_DATA environment variable.",
+                                     app.window);
+        }
+        app.quitting = true;
+        return;
+    }
     const fs::path saves = save_folder();
     app.default_save_dir = saves.string();
     std::error_code ec;
     fs::create_directories(saves, ec);
     SDL_Log("saves: %s", saves.string().c_str());
+    SDL_Log("data: %s", data.string().c_str());
     app.machine = std::make_unique<chq::dos::Machine>(chq::recomp::program(),
-                                                      chq::dos::FileSystem{data_folder(), saves});
+                                                      chq::dos::FileSystem{data, saves});
     sync_machine_settings(app);
     if (!app.smoke) app.machine->start_title_intro();
 #endif
@@ -341,10 +442,16 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
         callbacks.sync_startup_settings = [](void* ctx) {
             sync_machine_settings(*static_cast<App*>(ctx));
         };
-        callbacks.get_doc_text = [](void*) -> const char* {
+        callbacks.get_doc_text = [](void* ctx) -> const char* {
             static std::string doc_text;
             if (doc_text.empty()) {
-                auto d = chq::DataPath::from_environment();
+                auto* a = static_cast<App*>(ctx);
+                std::optional<chq::DataPath> d;
+                if (a && !a->data_dir.empty()) {
+                    d = chq::DataPath(a->data_dir);
+                } else {
+                    d = chq::DataPath::from_environment();
+                }
                 if (d) {
                     auto p = d->resolve("READ.ME");
                     if (!p) p = d->resolve("README");
