@@ -3,58 +3,483 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Command HQ</title>
+<title>Command HQ // binolabs.com</title>
 <style>
-  :root { color-scheme: dark; }
+  :root {
+    color-scheme: dark;
+    --term-green: #33ff33;
+    --term-dim: #1c881c;
+    --term-amber: #ffb000;
+    --term-amber-dim: #996a00;
+    --term-red: #ff4444;
+    --term-bg: #070b07;
+    --term-panel: #111a11;
+    --term-border: #1f331f;
+    --term-btn: #182918;
+    --term-btn-hover: #243e24;
+  }
+  * { box-sizing: border-box; }
   html, body {
     margin: 0;
     padding: 0;
     width: 100%;
     height: 100%;
     overflow: hidden;
-    background: #000;
-    color: #aaa;
-    font: 14px/1.4 ui-monospace, Menlo, monospace;
+    background: var(--term-bg);
+    color: var(--term-green);
+    font: 13px/1.4 ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+    user-select: none;
+  }
+  #app-container {
+    display: flex;
+    flex-direction: column;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+  }
+  header {
+    background: var(--term-panel);
+    border-bottom: 2px solid var(--term-border);
+    padding: 8px 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    z-index: 10;
+  }
+  .title-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .title {
+    font-weight: bold;
+    font-size: 14px;
+    letter-spacing: 1.5px;
+    color: var(--term-amber);
+    text-shadow: 0 0 6px rgba(255, 176, 0, 0.4);
+  }
+  .mp-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .btn {
+    background: var(--term-btn);
+    color: var(--term-green);
+    border: 1px solid var(--term-dim);
+    padding: 5px 12px;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: bold;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-transform: uppercase;
+  }
+  .btn:hover:not(:disabled) {
+    background: var(--term-btn-hover);
+    border-color: var(--term-green);
+    box-shadow: 0 0 6px rgba(51, 255, 51, 0.4);
+  }
+  .btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+  .btn-amber {
+    color: var(--term-amber);
+    border-color: var(--term-amber-dim);
+  }
+  .btn-amber:hover:not(:disabled) {
+    border-color: var(--term-amber);
+    box-shadow: 0 0 6px rgba(255, 176, 0, 0.4);
+  }
+  .btn-danger {
+    color: var(--term-red);
+    border-color: #882222;
+  }
+  .btn-danger:hover:not(:disabled) {
+    border-color: var(--term-red);
+    box-shadow: 0 0 6px rgba(255, 68, 68, 0.4);
+  }
+  .room-input {
+    background: #040704;
+    color: var(--term-green);
+    border: 1px solid var(--term-dim);
+    padding: 5px 8px;
+    font-family: inherit;
+    font-size: 12px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    width: 100px;
+    text-align: center;
+    letter-spacing: 1px;
+  }
+  .room-input:focus {
+    outline: none;
+    border-color: var(--term-green);
+    box-shadow: 0 0 6px rgba(51, 255, 51, 0.4);
+  }
+  .badge {
+    padding: 4px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: bold;
+    border: 1px solid currentColor;
+    letter-spacing: 0.5px;
+  }
+  .badge-waiting {
+    color: var(--term-amber);
+    border-color: var(--term-amber);
+    background: rgba(255, 176, 0, 0.1);
+  }
+  .badge-connected {
+    color: var(--term-green);
+    border-color: var(--term-green);
+    background: rgba(51, 255, 51, 0.1);
+  }
+  .badge-offline {
+    color: #777;
+    border-color: #444;
+  }
+  .room-code-tag {
+    font-weight: bold;
+    font-size: 13px;
+    color: #fff;
+    background: #050805;
+    padding: 4px 8px;
+    border: 1px dashed var(--term-amber);
+    border-radius: 3px;
+    letter-spacing: 1.5px;
+  }
+  .instructions {
+    font-size: 11px;
+    color: #ccc;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 4px 8px;
+    border-radius: 3px;
+    border-left: 2px solid var(--term-amber);
   }
   main {
+    flex: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    width: 100vw;
-    height: 100vh;
-    height: 100dvh;
-    box-sizing: border-box;
-    padding: 8px;
-    gap: 8px;
+    overflow: hidden;
+    padding: 6px;
+    position: relative;
+    background: radial-gradient(circle at center, #0f180f 0%, #050805 100%);
   }
   canvas {
-    width: min(calc(100vw - 16px), calc((100dvh - 48px) * 4 / 3)) !important;
+    width: min(calc(100vw - 16px), calc((100dvh - 90px) * 4 / 3)) !important;
     height: auto !important;
     max-width: 100% !important;
-    max-height: calc(100dvh - 48px) !important;
+    max-height: calc(100dvh - 90px) !important;
     aspect-ratio: 4 / 3 !important;
     image-rendering: pixelated;
     outline: none;
+    border: 2px solid var(--term-border);
+    border-radius: 4px;
+    box-shadow: 0 0 25px rgba(0, 0, 0, 0.9), 0 0 10px rgba(51, 255, 51, 0.15);
+    cursor: default;
   }
-  p { margin: 0; text-align: center; }
+  footer {
+    background: var(--term-panel);
+    border-top: 1px solid var(--term-border);
+    padding: 4px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--term-dim);
+  }
+  #status {
+    color: var(--term-green);
+  }
+  .footer-links a {
+    color: var(--term-dim);
+    text-decoration: none;
+    margin-left: 12px;
+  }
+  .footer-links a:hover {
+    color: var(--term-green);
+  }
 </style>
 </head>
 <body>
-<main>
-  <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
-  <p id="status">Loading…</p>
-</main>
+<div id="app-container">
+  <header>
+    <div class="title-group">
+      <span class="title">⚔️ COMMAND HQ</span>
+      <span id="conn-badge" class="badge badge-offline">OFFLINE</span>
+    </div>
+
+    <!-- Multiplayer Control Bar -->
+    <div class="mp-bar" id="mp-controls">
+      <!-- State: Idle -->
+      <div id="mp-idle" style="display: flex; align-items: center; gap: 8px;">
+        <button id="btn-host" class="btn btn-amber">Host Game</button>
+        <span style="color: var(--term-dim);">|</span>
+        <input type="text" id="input-room" class="room-input" placeholder="WAR-XXXX" maxlength="8">
+        <button id="btn-join" class="btn">Join Game</button>
+      </div>
+
+      <!-- State: Hosting (Waiting for Peer) -->
+      <div id="mp-hosting" style="display: none; align-items: center; gap: 8px;">
+        <span style="color: #aaa;">Room:</span>
+        <span id="host-code-display" class="room-code-tag">WAR-????</span>
+        <button id="btn-copy-link" class="btn btn-amber">Copy Link</button>
+        <span class="instructions">In game: select <b>Modem &rarr; Answer</b></span>
+        <button id="btn-cancel-host" class="btn btn-danger">Cancel</button>
+      </div>
+
+      <!-- State: Connected -->
+      <div id="mp-active" style="display: none; align-items: center; gap: 8px;">
+        <span id="active-room-display" class="room-code-tag">WAR-????</span>
+        <span id="active-instructions" class="instructions">Opponent Connected!</span>
+        <button id="btn-disconnect" class="btn btn-danger">Disconnect</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
+  </main>
+
+  <footer>
+    <div id="status">Loading Command HQ engine…</div>
+    <div class="footer-links">
+      <span>Virtual 16550 UART (COM1 1200 Baud)</span>
+      <a href="javascript:void(0)" id="btn-fullscreen">Fullscreen</a>
+    </div>
+  </footer>
+</div>
+
 <script>
-  const status = document.getElementById('status');
-  const canvas = document.getElementById('canvas');
+  const statusEl = document.getElementById('status');
+  const canvasEl = document.getElementById('canvas');
+  const connBadge = document.getElementById('conn-badge');
+
+  const mpIdle = document.getElementById('mp-idle');
+  const mpHosting = document.getElementById('mp-hosting');
+  const mpActive = document.getElementById('mp-active');
+
+  const btnHost = document.getElementById('btn-host');
+  const btnJoin = document.getElementById('btn-join');
+  const inputRoom = document.getElementById('input-room');
+  const hostCodeDisplay = document.getElementById('host-code-display');
+  const btnCopyLink = document.getElementById('btn-copy-link');
+  const btnCancelHost = document.getElementById('btn-cancel-host');
+  const activeRoomDisplay = document.getElementById('active-room-display');
+  const activeInstructions = document.getElementById('active-instructions');
+  const btnDisconnect = document.getElementById('btn-disconnect');
+  const btnFullscreen = document.getElementById('btn-fullscreen');
+
+  let ws = null;
+  let currentRoom = null;
+  let isHostRole = false;
+
   var Module = {
-    canvas,
-    setStatus: (text) => { status.textContent = text || 'Click the screen to play Command HQ.'; },
-    print: (text) => console.log(text),
-    printErr: (text) => console.warn(text),
+    canvas: canvasEl,
+    chqSavesReady: false,
+    setStatus: (text) => {
+      statusEl.textContent = text || 'Command HQ Ready. Click the screen to command your forces.';
+    },
+    print: (text) => console.log('[CHQ]', text),
+    printErr: (text) => console.warn('[CHQ-ERR]', text),
+    chqRelaySend: (u8arr) => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(u8arr.buffer.slice(u8arr.byteOffset, u8arr.byteOffset + u8arr.byteLength));
+      }
+    },
+    chqRelayDisconnect: () => {
+      disconnectRelay();
+    }
   };
-  canvas.addEventListener('click', () => canvas.focus());
+
+  canvasEl.addEventListener('click', () => canvasEl.focus());
+
+  btnFullscreen.addEventListener('click', () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen().catch(() => {});
+    }
+  });
+
+  // Relay URL (relative to current origin, upgraded to wss/ws)
+  function getRelayUrl() {
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${window.location.host}/comhq/relay`;
+  }
+
+  function setBadge(state, text) {
+    connBadge.className = 'badge ' + (state === 'connected' ? 'badge-connected' : (state === 'waiting' ? 'badge-waiting' : 'badge-offline'));
+    connBadge.textContent = text;
+  }
+
+  function showIdleState() {
+    mpIdle.style.display = 'flex';
+    mpHosting.style.display = 'none';
+    mpActive.style.display = 'none';
+    setBadge('offline', 'OFFLINE');
+    currentRoom = null;
+  }
+
+  function showHostingState(code) {
+    currentRoom = code;
+    isHostRole = true;
+    mpIdle.style.display = 'none';
+    mpHosting.style.display = 'flex';
+    mpActive.style.display = 'none';
+    hostCodeDisplay.textContent = code;
+    setBadge('waiting', 'HOSTING: ' + code);
+  }
+
+  function showConnectedState(code, isHost) {
+    currentRoom = code;
+    isHostRole = isHost;
+    mpIdle.style.display = 'none';
+    mpHosting.style.display = 'none';
+    mpActive.style.display = 'flex';
+    activeRoomDisplay.textContent = code;
+    setBadge('connected', 'CONNECTED: ' + code);
+    if (isHost) {
+      activeInstructions.innerHTML = 'Host Connected &mdash; in game select <b>Modem &rarr; Answer</b>';
+    } else {
+      activeInstructions.innerHTML = 'Guest Connected &mdash; in game select <b>Modem &rarr; Call</b>';
+    }
+  }
+
+  function disconnectRelay() {
+    if (ws) {
+      ws.onclose = null;
+      ws.onerror = null;
+      ws.close();
+      ws = null;
+    }
+    if (typeof Module._chq_web_disconnect === 'function') {
+      Module._chq_web_disconnect();
+    }
+    showIdleState();
+  }
+
+  function connectToRelay(onOpenCallback) {
+    disconnectRelay();
+    const url = getRelayUrl();
+    console.log('[CHQ-NET] Connecting to relay:', url);
+    ws = new WebSocket(url);
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => {
+      console.log('[CHQ-NET] Connected to relay');
+      if (onOpenCallback) onOpenCallback();
+    };
+
+    ws.onmessage = (event) => {
+      if (typeof event.data === 'string') {
+        const line = event.data.trim();
+        console.log('[CHQ-NET] Received control message:', line);
+        if (line.startsWith('CREATED ')) {
+          const code = line.slice(8).trim();
+          showHostingState(code);
+          if (typeof Module._chq_web_init_session === 'function') {
+            const ptr = Module.stringToNewUTF8(code);
+            Module._chq_web_init_session(1, ptr);
+            Module._free(ptr);
+          }
+        } else if (line.startsWith('JOINED ')) {
+          const code = line.slice(7).trim();
+          showConnectedState(code, false);
+          if (typeof Module._chq_web_init_session === 'function') {
+            const ptr = Module.stringToNewUTF8(code);
+            Module._chq_web_init_session(0, ptr);
+            Module._free(ptr);
+          }
+          if (typeof Module._chq_web_set_connected === 'function') {
+            Module._chq_web_set_connected(1);
+          }
+        } else if (line === 'PEER_JOINED') {
+          showConnectedState(currentRoom, true);
+          if (typeof Module._chq_web_set_connected === 'function') {
+            Module._chq_web_set_connected(1);
+          }
+        } else if (line === 'PEER_LEFT') {
+          alert('Opponent has disconnected from the match.');
+          disconnectRelay();
+        } else if (line.startsWith('ERROR ')) {
+          alert('Match error: ' + line.slice(6));
+          disconnectRelay();
+        }
+      } else if (event.data instanceof ArrayBuffer) {
+        // Binary packet from peer
+        if (typeof Module._chq_web_rx_frame === 'function') {
+          const bytes = new Uint8Array(event.data);
+          const ptr = Module._malloc(bytes.length);
+          Module.HEAPU8.set(bytes, ptr);
+          Module._chq_web_rx_frame(ptr, bytes.length);
+          Module._free(ptr);
+        }
+      }
+    };
+
+    ws.onclose = () => {
+      console.log('[CHQ-NET] Relay connection closed');
+      disconnectRelay();
+    };
+
+    ws.onerror = (err) => {
+      console.error('[CHQ-NET] Relay error', err);
+      alert('Could not connect to multiplayer relay. Ensure you are signed in.');
+      disconnectRelay();
+    };
+  }
+
+  btnHost.addEventListener('click', () => {
+    connectToRelay(() => {
+      ws.send('CREATE\n');
+    });
+  });
+
+  btnJoin.addEventListener('click', () => {
+    let code = inputRoom.value.trim().toUpperCase();
+    if (!code) {
+      alert('Please enter a room code (e.g. WAR-XXXX).');
+      inputRoom.focus();
+      return;
+    }
+    if (!code.startsWith('WAR-')) {
+      code = 'WAR-' + code;
+    }
+    connectToRelay(() => {
+      ws.send('JOIN ' + code + '\n');
+    });
+  });
+
+  btnCopyLink.addEventListener('click', () => {
+    if (!currentRoom) return;
+    const shareUrl = `${window.location.origin}${window.location.pathname}?join=${currentRoom}`;
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      btnCopyLink.textContent = 'Copied!';
+      setTimeout(() => { btnCopyLink.textContent = 'Copy Link'; }, 2000);
+    }).catch(() => {
+      prompt('Copy this match link:', shareUrl);
+    });
+  });
+
+  btnCancelHost.addEventListener('click', disconnectRelay);
+  btnDisconnect.addEventListener('click', disconnectRelay);
+
+  // Auto-detect ?join=WAR-XXXX in URL
+  const urlParams = new URLSearchParams(window.location.search);
+  const joinParam = urlParams.get('join');
+  if (joinParam) {
+    inputRoom.value = joinParam.toUpperCase();
+    statusEl.textContent = `Match code ${joinParam} detected. Click "Join Game" when ready.`;
+  }
 </script>
 {{{ SCRIPT }}}
 </body>

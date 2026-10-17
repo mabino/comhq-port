@@ -9,8 +9,16 @@ TAG=4.0.15
 if ! docker image inspect $IMAGE >/dev/null 2>&1; then
   docker build -q --build-arg EMSDK_TAG=$TAG -f $ROOT/docker/wasm.Dockerfile -t $IMAGE $ROOT/docker >/dev/null
 fi
-docker run --rm -v "$ROOT:/src" -w /src -u "$(id -u):$(id -g)" -e HOME=/tmp $IMAGE sh -c '
+DATA_ARGS=()
+PRE_BUILD=""
+if [[ -n "${CHQ_DATA:-}" && -d "${CHQ_DATA}" ]]; then
+  DATA_DIR=$(cd "$CHQ_DATA" && pwd)
+  DATA_ARGS=(-v "$DATA_DIR:/raw_data:ro" -e CHQ_DATA=/tmp/chq_data)
+  PRE_BUILD="mkdir -p /tmp/chq_data && find /raw_data -maxdepth 1 -type f -exec cp {} /tmp/chq_data/ \;"
+fi
+docker run --rm -v "$ROOT:/src" "${DATA_ARGS[@]}" -w /src -u "$(id -u):$(id -g)" -e HOME=/tmp $IMAGE sh -c '
   set -e
+  '"$PRE_BUILD"'
   cmake --preset wasm
   cmake --build --preset wasm -- -j 2
   node build/wasm/engine/chq_tests.js'

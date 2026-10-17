@@ -4,6 +4,7 @@
 #include "net/modem_bridge.h"
 #include "net/multiplayer_manager.h"
 #include "net/multiplayer_transport.h"
+#include "net/web_transport.h"
 
 #if !defined(__EMSCRIPTEN__)
 #include "net/direct_transport.h"
@@ -71,6 +72,38 @@ TEST_CASE("LoopbackTransport creation and point-to-point communication") {
     CHECK_EQ(guest->state(), chq::net::MultiplayerState::Disconnected);
     CHECK_FALSE(host->is_connected());
     CHECK_FALSE(guest->is_connected());
+}
+
+TEST_CASE("WebTransport framing, state machine and data loop") {
+    auto host = std::make_shared<chq::net::WebTransport>(chq::net::TransportRole::Host, "WAR-TEST");
+    CHECK_EQ(host->role(), chq::net::TransportRole::Host);
+    CHECK_EQ(host->room_code(), "WAR-TEST");
+    CHECK_EQ(host->state(), chq::net::MultiplayerState::Disconnected);
+
+    CHECK(host->start());
+    CHECK_EQ(host->state(), chq::net::MultiplayerState::Hosting);
+    CHECK_FALSE(host->is_connected());
+
+    // Peer connects
+    host->set_peer_connected(true);
+    CHECK_EQ(host->state(), chq::net::MultiplayerState::Connected);
+    CHECK(host->is_connected());
+
+    // Simulate incoming framed packet: [0x55, 0x01, 0x00, 0x05, 'H', 'E', 'L', 'L', 'O']
+    const std::uint8_t packet[] = {0x55, 0x01, 0x00, 0x05, 'H', 'E', 'L', 'L', 'O'};
+    host->handle_rx_frame(packet, sizeof(packet));
+    CHECK_EQ(host->available(), 5);
+
+    char buf[16] = {0};
+    const std::size_t n = host->receive(buf, sizeof(buf));
+    CHECK_EQ(n, 5);
+    CHECK_EQ(std::string(buf, n), "HELLO");
+    CHECK_EQ(host->available(), 0);
+
+    // Disconnect
+    host->set_peer_connected(false);
+    CHECK_FALSE(host->is_connected());
+    CHECK_EQ(host->state(), chq::net::MultiplayerState::Disconnected);
 }
 
 TEST_CASE("ModemBridge UART registers and Hayes AT command processing") {

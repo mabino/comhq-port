@@ -3,6 +3,7 @@
 #include "net/direct_transport.h"
 #include "net/relay_server.h"
 #include "net/relay_transport.h"
+#include "net/web_transport.h"
 
 namespace chq::net {
 
@@ -50,6 +51,24 @@ bool MultiplayerManager::join_internet_game(const std::string& relay_host, int r
     disconnect();
     std::lock_guard<std::mutex> lock(mutex_);
     auto transport = std::make_shared<RelayTransport>(relay_host, relay_port, room_code, TransportRole::Guest);
+    active_transport_ = transport;
+    modem_bridge_->set_transport(transport);
+    return transport->start();
+}
+
+bool MultiplayerManager::host_web_game(const std::string& custom_room_code) {
+    disconnect();
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto transport = std::make_shared<WebTransport>(TransportRole::Host, custom_room_code);
+    active_transport_ = transport;
+    modem_bridge_->set_transport(transport);
+    return transport->start();
+}
+
+bool MultiplayerManager::join_web_game(const std::string& room_code) {
+    disconnect();
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto transport = std::make_shared<WebTransport>(TransportRole::Guest, room_code);
     active_transport_ = transport;
     modem_bridge_->set_transport(transport);
     return transport->start();

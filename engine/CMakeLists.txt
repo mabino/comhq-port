@@ -21,6 +21,7 @@ add_library(chq_core
   src/net/relay_transport.cpp
   src/net/modem_bridge.cpp
   src/net/multiplayer_manager.cpp
+  src/net/web_transport.cpp
 )
 target_include_directories(chq_core PUBLIC src)
 target_link_libraries(chq_core PUBLIC chq_flags)
@@ -90,7 +91,12 @@ if(CHQ_BUILD_APP)
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/resources/Info.plist.in")
   if(EMSCRIPTEN)
     set_target_properties(comhq PROPERTIES OUTPUT_NAME comhq SUFFIX .html)
-    target_link_options(comhq PRIVATE -sALLOW_MEMORY_GROWTH=1 -sFORCE_FILESYSTEM=1 -lidbfs.js
+    target_link_options(comhq PRIVATE
+      -sALLOW_MEMORY_GROWTH=1
+      -sFORCE_FILESYSTEM=1
+      -lidbfs.js
+      "-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_chq_web_init_session','_chq_web_set_connected','_chq_web_rx_frame','_chq_web_disconnect']"
+      "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap']"
       "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html")
     if(DEFINED ENV{CHQ_DATA} AND EXISTS "$ENV{CHQ_DATA}/CHQ.EXE")
       target_link_options(comhq PRIVATE "--preload-file=$ENV{CHQ_DATA}@/data")

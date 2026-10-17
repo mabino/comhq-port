@@ -27,6 +27,10 @@ public:
     bool join_internet_game(const std::string& relay_host, int relay_port,
                             const std::string& room_code);
 
+    // Web Session (WASM WebSocket Relay)
+    bool host_web_game(const std::string& custom_room_code = "");
+    bool join_web_game(const std::string& room_code);
+
     // Direct LAN / IP Session
     bool host_lan_game(int port = 7190);
     bool join_lan_game(const std::string& remote_host, int port = 7190);
