@@ -117,6 +117,13 @@ public:
             pending_in_game_save_ = true;
         }
     }
+    void request_resume_saved_war(std::string path);
+    bool has_pending_resume_war() const { return !pending_resume_war_path_.empty(); }
+    std::string consume_pending_resume_war() {
+        std::string p = std::move(pending_resume_war_path_);
+        pending_resume_war_path_.clear();
+        return p;
+    }
     const std::deque<std::uint8_t>& pending_scancodes() const { return scancodes_; }
     void set_modem_bridge(std::shared_ptr<net::ModemBridge> mb) { modem_bridge_ = std::move(mb); }
     const std::shared_ptr<net::ModemBridge>& modem_bridge() const { return modem_bridge_; }
@@ -316,6 +323,7 @@ private:
     std::uint64_t sub_slices_ = 0;
 
     std::optional<std::filesystem::path> active_save_path_;
+    std::string pending_resume_war_path_;
     RestoreHook restore_hook_;
     SaveHook save_hook_;
     bool unsaved_progress_ = false;

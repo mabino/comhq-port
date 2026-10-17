@@ -264,13 +264,21 @@ class _SegmentGen:
         out += ["        default: return;", "    }"]
         for start, body in self.blocks:
             out.append(f"L_{start:05x}:")
-            if start == 0x102ef:
+            if start == 0x21540:
                 out.append("    if (m.resume_saved_war_hook) {")
-                out.append("        c.r[4] = static_cast<std::uint16_t>(c.r[4] + 0x4);")
                 out.append("        const int act = m.resume_saved_war_hook(m);")
-                out.append("        if (act == 1) goto L_10302;")
-                out.append("        if (act == 2) goto L_10394;")
-                out.append("        c.r[4] = static_cast<std::uint16_t>(c.r[4] - 0x4);")
+                out.append("        if (act == 1) goto L_21576;")
+                out.append("        if (act == 2) goto L_210cc;")
+                out.append("    }")
+            if start == 0x2312c:
+                out.append("    if (m.has_pending_resume_war()) {")
+                out.append("        const std::uint16_t o0 = static_cast<std::uint16_t>(c.r[5] + 0x6);")
+                out.append("        const std::uint16_t t_off = m.rd16(c.s[2], o0);")
+                out.append("        const std::uint16_t t_seg = m.rd16(c.s[2], static_cast<std::uint16_t>(o0 + 2));")
+                out.append("        if (t_seg == 0x2e27 && t_off == 0x173a) {")
+                out.append("            c.r[0] = 1;")
+                out.append("            goto L_2313a;")
+                out.append("        }")
                 out.append("    }")
             if start == 0x1049e:
                 out.append("    if (m.in_game_save_hook) {")

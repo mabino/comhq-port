@@ -95,7 +95,7 @@ fs::path save_folder() {
     return fs::temp_directory_path() / "Command HQ";
 }
 
-fs::path data_folder(App& app) {
+[[maybe_unused]] fs::path data_folder(App& app) {
     if (!app.data_dir.empty()) {
         std::error_code ec;
         if (fs::exists(app.data_dir, ec) && chq::DataPath::looks_like_install(app.data_dir)) {
@@ -214,7 +214,7 @@ bool save_bmp(App& app, const char* path) {
     return ok;
 }
 
-void sync_machine_settings(App& app) {
+[[maybe_unused]] void sync_machine_settings(App& app) {
     if (!app.machine) return;
     chq::dos::Machine::StartupSettings settings;
 #if defined(__APPLE__) && !defined(__EMSCRIPTEN__)
@@ -224,8 +224,8 @@ void sync_machine_settings(App& app) {
     app.machine->set_startup_settings(settings);
 }
 
-void import_save_file(App& app, const fs::path& src) {
-    if (app.default_save_dir.empty()) return;
+fs::path import_save_file(App& app, const fs::path& src) {
+    if (app.default_save_dir.empty()) return src;
     std::error_code ec;
     const fs::path dst_dir(app.default_save_dir);
     fs::create_directories(dst_dir, ec);
@@ -241,6 +241,7 @@ void import_save_file(App& app, const fs::path& src) {
     if (!fs::equivalent(src, dst, ec)) {
         fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
     }
+    return dst;
 }
 
 void start_game([[maybe_unused]] App& app) {
@@ -298,27 +299,45 @@ void start_game([[maybe_unused]] App& app) {
 #endif
     };
     app.machine->resume_saved_war_hook = [&app](chq::dos::Machine& m) -> int {
+        std::string chosen_path;
+        if (m.has_pending_resume_war()) {
+            chosen_path = m.consume_pending_resume_war();
+        }
 #if defined(__APPLE__) && !defined(__EMSCRIPTEN__)
-        char chosen[1024] = {0};
-        const char* def_dir = app.default_save_dir.empty() ? nullptr : app.default_save_dir.c_str();
-        if (!chq::macos::prompt_open_save_panel(chosen, sizeof(chosen), def_dir)) {
-            return 2;  // Cancel
+        else {
+            char chosen[1024] = {0};
+            const char* def_dir = app.default_save_dir.empty() ? nullptr : app.default_save_dir.c_str();
+            if (!chq::macos::prompt_open_save_panel(chosen, sizeof(chosen), def_dir)) {
+                return 2;  // Cancel -> return to main menu (L_210cc)
+            }
+            chosen_path = chosen;
         }
-        app.active_save_path = chosen;
-        m.set_active_save_path(app.active_save_path);
-        const std::string fn = fs::path(app.active_save_path).filename().string();
-        for (std::size_t i = 0; i < fn.size() && i < 64; ++i) {
-            m.wr8(m.cpu.s[3], static_cast<std::uint16_t>(0xc5c2 + i), static_cast<std::uint8_t>(fn[i]));
-        }
-        m.wr8(m.cpu.s[3], static_cast<std::uint16_t>(0xc5c2 + std::min<std::size_t>(fn.size(), 64)), 0);
-        return 1;  // Load
-#else
-        (void)app;
-        (void)m;
-        return 0;
 #endif
+        if (chosen_path.empty()) {
+            return 0;
+        }
+
+        if (!chq::validate_save_file(chosen_path)) {
+            SDL_Log("Command HQ: chosen save file %s is invalid.", chosen_path.c_str());
+            return 2;
+        }
+
+        const fs::path imported = import_save_file(app, chosen_path);
+        app.active_save_path = imported.string();
+        m.set_active_save_path(app.active_save_path);
+
+        const std::string fn = imported.filename().string();
+        const std::uint16_t dgroup = m.cpu.s[3] ? m.cpu.s[3] : chq::dos::Machine::kDgroupSeg;
+        for (std::size_t i = 0; i < fn.size() && i < 64; ++i) {
+            m.wr8(dgroup, static_cast<std::uint16_t>(0xc5c2 + i), static_cast<std::uint8_t>(fn[i]));
+        }
+        m.wr8(dgroup, static_cast<std::uint16_t>(0xc5c2 + std::min<std::size_t>(fn.size(), 64)), 0);
+
+        return 1;  // Load -> jump to L_21576
     };
-    if (!app.smoke) app.machine->start_title_intro();
+    if (!app.smoke && !app.machine->has_pending_resume_war()) {
+        app.machine->start_title_intro();
+    }
 #endif
 }
 
@@ -550,8 +569,16 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
         };
         callbacks.open_game = [](void* ctx, const char* path) {
             auto* a = static_cast<App*>(ctx);
-            if (path) {
-                import_save_file(*a, path);
+            if (!path) return;
+            if (a->machine && a->machine->is_in_game()) {
+                if (!confirm_unsaved_changes(*a, "Are you sure you want to load another game? Any unsaved progress will be lost.")) {
+                    return;
+                }
+            }
+            const fs::path imported = import_save_file(*a, path);
+            a->active_save_path = imported.string();
+            if (a->machine) {
+                a->machine->request_resume_saved_war(a->active_save_path);
             }
         };
         callbacks.get_default_save_dir = [](void* ctx) -> const char* {
@@ -605,7 +632,16 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
                                          app->window);
                 return SDL_APP_CONTINUE;
             }
-            import_save_file(*app, dropped);
+            if (app->machine && app->machine->is_in_game()) {
+                if (!confirm_unsaved_changes(*app, "Are you sure you want to load the dropped game? Any unsaved progress will be lost.")) {
+                    return SDL_APP_CONTINUE;
+                }
+            }
+            const fs::path imported = import_save_file(*app, dropped);
+            app->active_save_path = imported.string();
+            if (app->machine) {
+                app->machine->request_resume_saved_war(app->active_save_path);
+            }
         }
         return SDL_APP_CONTINUE;
     }
@@ -679,7 +715,11 @@ SDL_AppResult step_app_frame(App& app) {
     if (app.frames++ == 0) {
         start_game(app);
         if (!app.initial_save_to_load.empty()) {
-            import_save_file(app, app.initial_save_to_load);
+            const fs::path imported = import_save_file(app, app.initial_save_to_load);
+            app.active_save_path = imported.string();
+            if (app.machine) {
+                app.machine->request_resume_saved_war(app.active_save_path);
+            }
             app.initial_save_to_load.clear();
         }
     }

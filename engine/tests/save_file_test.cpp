@@ -168,4 +168,36 @@ TEST_CASE("Machine resume_saved_war_hook integration") {
     CHECK_EQ(m.active_save_path(), fs::path("/tmp/test_war.sg"));
 }
 
+TEST_CASE("Machine request_resume_saved_war and pending lifecycle") {
+    std::vector<std::uint8_t> image(0x40000, 0);
+    chq::dos::Program prog{image, 0x1000, 0x1000, 0, 0x1000, 0x200, 0, {}, {}, {}, {}};
+    chq::dos::Machine m(prog, {});
+
+    CHECK_FALSE(m.has_pending_resume_war());
+
+    m.request_resume_saved_war("/path/to/MYWAR.SG");
+    CHECK(m.has_pending_resume_war());
+    CHECK_EQ(m.active_save_path(), fs::path("/path/to/MYWAR.SG"));
+
+    std::string consumed = m.consume_pending_resume_war();
+    CHECK_EQ(consumed, "/path/to/MYWAR.SG");
+    CHECK_FALSE(m.has_pending_resume_war());
+}
+
+TEST_CASE("Machine request_resume_saved_war resets when in-game or title intro") {
+    std::vector<std::uint8_t> image(0x40000, 0);
+    chq::dos::Program prog{image, 0x1000, 0x1000, 0, 0x1000, 0x200, 0, {}, {}, {}, {}};
+    chq::dos::Machine m(prog, {});
+
+    // Simulate in-game state
+    m.wr8(chq::dos::Machine::kDgroupSeg, 0x147c, 1);
+    CHECK(m.is_in_game());
+
+    m.request_resume_saved_war("/saves/CHQ-03.SG");
+    // After request_resume_saved_war in-game, reset() was called so in-game flag is cleared
+    CHECK_FALSE(m.is_in_game());
+    CHECK(m.has_pending_resume_war());
+    CHECK_EQ(m.consume_pending_resume_war(), "/saves/CHQ-03.SG");
+}
+
 }  // TEST_SUITE("save_file")

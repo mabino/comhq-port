@@ -152,6 +152,15 @@ void Machine::reset() {
     mouse_cb_off_ = 0;
 }
 
+void Machine::request_resume_saved_war(std::string path) {
+    pending_resume_war_path_ = std::move(path);
+    active_save_path_ = pending_resume_war_path_;
+    if (in_title_intro_ || is_in_game()) {
+        in_title_intro_ = false;
+        reset();
+    }
+}
+
 void Machine::fail(std::string why) {
     if (state_ != State::Running) return;
     state_ = State::Faulted;
