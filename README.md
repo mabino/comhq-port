@@ -131,16 +131,16 @@ Docker (or Colima on macOS Apple Silicon) is used for containerized Linux CI run
 ## Usage Guide
 
 ### 1. Game Binary Setup
-Place your original *Command HQ* files (`CHQ.EXE`, `EGRAPHIC.EXE`, `FONTS.CHQ`, `TEXT.DAT`, `*.PCX`, `*.WAL`, etc.) in the directory directly above this repository:
+Place your original *Command HQ* files (`CHQ.EXE`, `EGRAPHIC.EXE`, `FONTS.CHQ`, `CMPWRLD.DAT`, `REGIONS.DAT`, `*.PIC`, `*.DAT`, `*.SNG`, etc.) in the directory directly above this repository:
 ```
 comhq/
   ├── CHQ.EXE
   ├── EGRAPHIC.EXE
   ├── FONTS.CHQ
-  ├── TEXT.DAT
-  ├── CHQTITLE.PCX
-  ├── MAINMENU.PCX
-  ├── CHQMAP.PCX
+  ├── CMPWRLD.DAT
+  ├── REGIONS.DAT
+  ├── WORLD.PIC
+  ├── UNITS.PIC
   └── comhq-port/        <-- this repository
 ```
 *(You can also set the `CHQ_DATA` environment variable to point to any directory containing `CHQ.EXE`.)*
@@ -286,6 +286,6 @@ Builds the WebAssembly binaries and runs the C++ unit test suite under Node.js:
 
 ## Clean-Room & Security Policy
 
-- Original binary files (`*.EXE`, `*.PCX`, `*.WAL`, `*.DAT`, `*.CHQ`, `*.SG`, `*.DRV`, `*.OVL`) are ignored by git and never committed.
+- Original binary and data files (`*.EXE`, `*.PIC`, `*.DAT`, `*.CAT`, `*.CHQ`, `*.SNG`, `*.SG`, `*.DRV`, `*.OVL`, `*.COM`, `*.PAN`) are ignored by git and never committed.
 - Recompiled C++ translation units (`build/generated/*.cpp`) are generated locally from the user's binary and never committed.
 - All test suites use mock byte sequences, synthetic MZ executables, or in-memory loopback transports to enable verification in clean CI environments without external game assets.
