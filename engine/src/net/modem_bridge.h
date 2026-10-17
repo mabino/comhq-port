@@ -31,6 +31,7 @@ public:
 
     // Direct modem state control
     bool is_online() const { return online_mode_; }
+    int active_port() const { return active_port_; }
     void force_disconnect();
 
 private:
@@ -64,6 +65,7 @@ private:
     const UartPort& get_port(int num) const { return (num == 1) ? com1_ : com2_; }
 
     // AT Command processor
+    int active_port_ = 1;
     bool online_mode_ = false;
     bool echo_enabled_ = true;
     std::string at_cmd_buffer_;

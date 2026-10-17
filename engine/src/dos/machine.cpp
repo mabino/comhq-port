@@ -87,7 +87,9 @@ void Machine::reset() {
     wr16(0, 0x43 * 4 + 2, kBiosSeg);
 
     // BIOS data area.
-    wr16(0x40, 0x10, 0x0021);  // equipment: floppy, 80x25 colour (EGA reports via INT 10h/12h)
+    wr16(0x40, 0x00, 0x03F8);  // COM1 base port
+    wr16(0x40, 0x02, 0x02F8);  // COM2 base port
+    wr16(0x40, 0x10, 0x0221);  // equipment: RS232 serial port, floppy, 80x25 colour (EGA reports via INT 10h/12h)
     wr16(0x40, 0x13, 640);     // KB of conventional memory
     mem_[0x449] = 3;           // video mode
     wr16(0x40, 0x4A, 80);

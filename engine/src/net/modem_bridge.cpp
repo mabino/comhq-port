@@ -28,7 +28,7 @@ void ModemBridge::force_disconnect() {
 }
 
 void ModemBridge::queue_modem_response(const std::string& resp) {
-    auto& port = get_port(1);
+    auto& port = get_port(active_port_);
     for (char c : resp) {
         port.rx_fifo.push_back(static_cast<std::uint8_t>(c));
     }
@@ -128,8 +128,8 @@ void ModemBridge::update() {
             return;
         }
 
-        // Receive data from transport into COM1 rx_fifo
-        auto& port = get_port(1);
+        // Receive data from transport into active port rx_fifo
+        auto& port = get_port(active_port_);
         std::uint8_t temp[512];
         std::size_t n = transport_->receive(temp, sizeof(temp));
         if (n > 0) {
@@ -202,6 +202,7 @@ std::uint8_t ModemBridge::uart_read(int port_num, int reg_offset) {
 
 void ModemBridge::uart_write(int port_num, int reg_offset, std::uint8_t value) {
     std::lock_guard<std::mutex> lock(mutex_);
+    active_port_ = port_num;
     auto& port = get_port(port_num);
 
     switch (reg_offset) {

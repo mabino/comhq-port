@@ -191,6 +191,42 @@ TEST_CASE("ModemBridge handshake, carrier detection, and IRQ delivery") {
     CHECK_FALSE(modem_host.is_online());
 }
 
+TEST_CASE("ModemBridge COM2 operation and dynamic port selection") {
+    auto [host_lp, guest_lp] = chq::net::LoopbackTransport::create_pair("COM2-TEST");
+    chq::net::ModemBridge modem_host;
+    chq::net::ModemBridge modem_guest;
+
+    modem_host.set_transport(host_lp);
+    modem_guest.set_transport(guest_lp);
+
+    // Host answers on COM2 (port 2)
+    const std::string ata = "ATA\r";
+    for (char c : ata) modem_host.uart_write(2, 0, static_cast<std::uint8_t>(c));
+
+    // Guest dials on COM2 (port 2)
+    const std::string atd = "ATD5551212\r";
+    for (char c : atd) modem_guest.uart_write(2, 0, static_cast<std::uint8_t>(c));
+
+    modem_host.update();
+    modem_guest.update();
+
+    CHECK(modem_host.is_online());
+    CHECK(modem_guest.is_online());
+    CHECK_EQ(modem_host.active_port(), 2);
+    CHECK_EQ(modem_guest.active_port(), 2);
+
+    // Drain CONNECT responses from COM2
+    while (modem_guest.uart_read(2, 5) & 0x01) {
+        modem_guest.uart_read(2, 0);
+    }
+
+    // Host sends byte on COM2
+    modem_host.uart_write(2, 0, 0x42);
+    modem_guest.update();
+
+    CHECK_EQ(modem_guest.uart_read(2, 0), 0x42);
+}
+
 TEST_CASE("MultiplayerManager singleton and loopback session lifecycle") {
     auto& mgr = chq::net::MultiplayerManager::instance();
     CHECK_EQ(mgr.state(), chq::net::MultiplayerState::Disconnected);
