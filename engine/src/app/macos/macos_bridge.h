@@ -62,6 +62,7 @@ void show_settings_window();
 void show_help_window();
 
 // Native modal panels
+bool prompt_open_save_panel(char* out_path, std::size_t max_len, const char* default_dir);
 bool prompt_save_as_panel(char* out_path, std::size_t max_len, const char* default_dir, const char* default_name);
 UnsavedPromptResult prompt_unsaved_changes_alert(const char* action_message);
 void show_alert(const char* title, const char* message);
@@ -124,6 +125,7 @@ inline void sync_macos_sound_ui(float, bool) {}
 inline void show_settings_window() {}
 inline void show_help_window() {}
 
+inline bool prompt_open_save_panel(char*, std::size_t, const char*) { return false; }
 inline bool prompt_save_as_panel(char*, std::size_t, const char*, const char*) { return false; }
 inline UnsavedPromptResult prompt_unsaved_changes_alert(const char*) { return UnsavedPromptResult::DontSave; }
 inline void show_alert(const char*, const char*) {}

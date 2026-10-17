@@ -149,4 +149,23 @@ TEST_CASE("Options menu patches remove Exit to DOS and resize box") {
     CHECK_EQ(m.mem()[0x2F99B], 0x00);
 }
 
+TEST_CASE("Machine resume_saved_war_hook integration") {
+    std::vector<std::uint8_t> image(0x40000, 0);
+    chq::dos::Program prog{image, 0x1000, 0x1000, 0, 0x1000, 0x200, 0, {}, {}, {}, {}};
+    chq::dos::Machine m(prog, {});
+
+    bool hook_invoked = false;
+    m.resume_saved_war_hook = [&](chq::dos::Machine& mach) -> int {
+        hook_invoked = true;
+        mach.set_active_save_path(fs::path("/tmp/test_war.sg"));
+        return 1;
+    };
+
+    REQUIRE(m.resume_saved_war_hook);
+    int res = m.resume_saved_war_hook(m);
+    CHECK(hook_invoked);
+    CHECK_EQ(res, 1);
+    CHECK_EQ(m.active_save_path(), fs::path("/tmp/test_war.sg"));
+}
+
 }  // TEST_SUITE("save_file")

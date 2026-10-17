@@ -15,6 +15,12 @@ add_library(chq_core
   src/dos/speaker.cpp
   src/app/mouse_control.cpp
   src/app/host_keys.cpp
+  src/net/loopback_transport.cpp
+  src/net/direct_transport.cpp
+  src/net/relay_server.cpp
+  src/net/relay_transport.cpp
+  src/net/modem_bridge.cpp
+  src/net/multiplayer_manager.cpp
 )
 target_include_directories(chq_core PUBLIC src)
 target_link_libraries(chq_core PUBLIC chq_flags)
@@ -112,6 +118,7 @@ if(CHQ_BUILD_TESTS)
     tests/window_geometry_test.cpp
     tests/mouse_control_test.cpp
     tests/host_keys_test.cpp
+    tests/multiplayer_test.cpp
   )
   target_link_libraries(chq_tests PRIVATE chq_core doctest::doctest)
   add_test(NAME unit COMMAND chq_tests)

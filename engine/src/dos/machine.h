@@ -18,6 +18,10 @@
 #include "dos/ega.h"
 #include "dos/speaker.h"
 
+namespace chq::net {
+class ModemBridge;
+}
+
 namespace chq::dos {
 
 class Machine;
@@ -114,6 +118,8 @@ public:
         }
     }
     const std::deque<std::uint8_t>& pending_scancodes() const { return scancodes_; }
+    void set_modem_bridge(std::shared_ptr<net::ModemBridge> mb) { modem_bridge_ = std::move(mb); }
+    const std::shared_ptr<net::ModemBridge>& modem_bridge() const { return modem_bridge_; }
 
     // Statistics for development: code the recompiler missed.
     const std::map<std::uint32_t, std::uint64_t>& interpreted() const { return interpreted_; }
@@ -134,6 +140,7 @@ public:
     void set_tracing(bool on) { tracing = on; }
     std::function<bool(std::uint32_t)> block_hook;
     std::function<int(Machine&)> in_game_save_hook;
+    std::function<int(Machine&)> resume_saved_war_hook;
     void set_interpret_only(bool on) { interpret_only_ = on; }
     void set_deterministic_ticks(bool on) { deterministic_ticks_ = on; }
     std::vector<std::uint32_t> trace_tail() const;
@@ -314,6 +321,7 @@ private:
     bool unsaved_progress_ = false;
     bool pending_in_game_save_ = false;
     StartupSettings startup_settings_;
+    std::shared_ptr<net::ModemBridge> modem_bridge_;
 
     std::uint16_t psp_seg_ = 0x0FF0;
     std::uint16_t psp_paras_ = 0x4000;

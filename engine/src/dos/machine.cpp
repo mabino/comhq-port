@@ -11,6 +11,7 @@
 #include "dos/dos_file.h"
 #include "dos/keymap.h"
 #include "dos/rom_font.h"
+#include "net/modem_bridge.h"
 
 namespace chq::dos {
 
@@ -464,6 +465,24 @@ void Machine::deliver_hardware() {
             }
         }
     }
+
+    // 3. Deliver Serial / Modem interrupts (IRQ 4 for COM1 -> INT 0Ch, IRQ 3 for COM2 -> INT 0Bh)
+    if (modem_bridge_) {
+        modem_bridge_->update();
+        if (cpu.ifl && !pic_in_service_ && !in_stub &&
+            (in_title_intro_ || interpret_only_ || program_.segments.empty() || is_block(cpu.pc) || cpu.pc >= 0x60000)) {
+            if (modem_bridge_->has_pending_irq(1) && hooked(0x0C)) {
+                pic_in_service_ = true;
+                interrupt(0x0C, cpu.pc);
+                return;
+            }
+            if (modem_bridge_->has_pending_irq(2) && hooked(0x0B)) {
+                pic_in_service_ = true;
+                interrupt(0x0B, cpu.pc);
+                return;
+            }
+        }
+    }
 }
 
 void Machine::key_down(std::uint8_t scan, std::uint8_t ascii) {
@@ -551,6 +570,10 @@ void Machine::video_write(std::uint32_t a, std::uint8_t v) {
 }
 
 std::uint8_t Machine::in8(std::uint16_t port) {
+    if (modem_bridge_) {
+        if (port >= 0x3F8 && port <= 0x3FF) return modem_bridge_->uart_read(1, port - 0x3F8);
+        if (port >= 0x2F8 && port <= 0x2FF) return modem_bridge_->uart_read(2, port - 0x2F8);
+    }
     if (port >= 0x3C0 && port <= 0x3DF) return ega_.port_in(port);
     if (port == 0x3BA) return ega_.port_in(port);
     switch (port) {
@@ -575,6 +598,10 @@ std::uint8_t Machine::in8(std::uint16_t port) {
 }
 
 void Machine::out8(std::uint16_t port, std::uint8_t v) {
+    if (modem_bridge_) {
+        if (port >= 0x3F8 && port <= 0x3FF) { modem_bridge_->uart_write(1, port - 0x3F8, v); return; }
+        if (port >= 0x2F8 && port <= 0x2FF) { modem_bridge_->uart_write(2, port - 0x2F8, v); return; }
+    }
     if (port >= 0x3C0 && port <= 0x3DF) {
         ega_.port_out(port, v);
         return;

@@ -9,6 +9,7 @@
 
 #include "app/macos/macos_bridge.h"
 #include "core/save_file.h"
+#include "net/multiplayer_manager.h"
 
 static NSString* const kPrefFullScreenByDefault = @"FullScreenByDefault";
 static NSString* const kPrefSoundMuted = @"SoundMuted";
@@ -33,6 +34,12 @@ static NSString* const kPrefAutoSubmitManualWord = @"AutoSubmitManualWord";
 @property (nonatomic, strong, nullable) NSMenuItem* soundMenuVolumeIndicator;
 @property (nonatomic, strong, nullable) NSTimer* trackingTimer;
 
+@property (nonatomic, strong, nullable) NSMenuItem* mpHostItem;
+@property (nonatomic, strong, nullable) NSMenuItem* mpJoinItem;
+@property (nonatomic, strong, nullable) NSMenuItem* mpDirectItem;
+@property (nonatomic, strong, nullable) NSMenuItem* mpDisconnectItem;
+@property (nonatomic, strong, nullable) NSMenuItem* mpStatusItem;
+
 @property (nonatomic, assign) chq::macos::AppBridgeCallbacks callbacks;
 
 - (void)openSettingsWindow:(nullable id)sender;
@@ -49,6 +56,12 @@ static NSString* const kPrefAutoSubmitManualWord = @"AutoSubmitManualWord";
 - (void)saveGameAs:(nullable id)sender;
 - (void)openGame:(nullable id)sender;
 - (void)revealSavesFolder:(nullable id)sender;
+
+- (void)hostInternetMatch:(nullable id)sender;
+- (void)joinInternetMatch:(nullable id)sender;
+- (void)directMatch:(nullable id)sender;
+- (void)disconnectMultiplayer:(nullable id)sender;
+
 - (BOOL)validateMenuItem:(NSMenuItem*)item;
 
 @end
@@ -467,7 +480,328 @@ static ChqMacAppController* s_controller = nil;
         }
         return NO;
     }
+    if (item.action == @selector(disconnectMultiplayer:)) {
+        return chq::net::MultiplayerManager::instance().state() != chq::net::MultiplayerState::Disconnected;
+    }
+    if (self.mpStatusItem) {
+        auto& mgr = chq::net::MultiplayerManager::instance();
+        switch (mgr.state()) {
+            case chq::net::MultiplayerState::Disconnected:
+                self.mpStatusItem.title = @"Status: Inactive";
+                break;
+            case chq::net::MultiplayerState::Hosting: {
+                std::string rc = mgr.room_code();
+                if (rc.empty()) {
+                    self.mpStatusItem.title = @"Status: Hosting (Connecting...)";
+                } else {
+                    self.mpStatusItem.title = [NSString stringWithFormat:@"Status: Hosting (Room %@)",
+                        [NSString stringWithUTF8String:rc.c_str()]];
+                }
+                break;
+            }
+            case chq::net::MultiplayerState::Connecting:
+                self.mpStatusItem.title = @"Status: Connecting...";
+                break;
+            case chq::net::MultiplayerState::Connected: {
+                double rtt = mgr.round_trip_time_ms();
+                std::string rc = mgr.room_code();
+                if (rtt > 0.0) {
+                    self.mpStatusItem.title = [NSString stringWithFormat:@"Status: Connected (%@ | %.0f ms)",
+                        [NSString stringWithUTF8String:rc.c_str()], rtt];
+                } else {
+                    self.mpStatusItem.title = [NSString stringWithFormat:@"Status: Connected (%@)",
+                        [NSString stringWithUTF8String:rc.c_str()]];
+                }
+                break;
+            }
+            case chq::net::MultiplayerState::Faulted:
+                self.mpStatusItem.title = @"Status: Connection Faulted";
+                break;
+        }
+    }
     return YES;
+}
+
+- (void)hostInternetMatch:(nullable id)sender {
+    (void)sender;
+    auto& mgr = chq::net::MultiplayerManager::instance();
+    if (mgr.state() != chq::net::MultiplayerState::Disconnected) {
+        NSAlert* confirm = [[NSAlert alloc] init];
+        confirm.messageText = @"Active Multiplayer Session";
+        confirm.informativeText = @"A multiplayer session is already active. Disconnect and start a new host session?";
+        confirm.alertStyle = NSAlertStyleWarning;
+        [confirm addButtonWithTitle:@"Disconnect & Host"];
+        [confirm addButtonWithTitle:@"Cancel"];
+        if ([confirm runModal] != NSAlertFirstButtonReturn) {
+            return;
+        }
+        mgr.disconnect();
+    }
+
+    NSAlert* alert = [[NSAlert alloc] init];
+    alert.messageText = @"Host Internet Match";
+    alert.informativeText = @"Host a multiplayer game across the internet. An outbound connection will connect to the relay broker and assign a Room Code.";
+    alert.alertStyle = NSAlertStyleInformational;
+    [alert addButtonWithTitle:@"Host Match"];
+    [alert addButtonWithTitle:@"Cancel"];
+
+    NSView* container = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 320, 85)];
+
+    NSTextField* relayLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 58, 320, 18)];
+    relayLabel.stringValue = @"Relay Server (host:port or localhost):";
+    relayLabel.editable = NO;
+    relayLabel.bordered = NO;
+    relayLabel.backgroundColor = [NSColor clearColor];
+    [container addSubview:relayLabel];
+
+    const char* env_relay = std::getenv("CHQ_RELAY_SERVER");
+    NSString* defRelay = (env_relay && env_relay[0]) ? [NSString stringWithUTF8String:env_relay] : @"localhost:7190";
+    NSTextField* relayField = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 36, 320, 22)];
+    relayField.stringValue = defRelay;
+    [container addSubview:relayField];
+
+    NSTextField* codeLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 18, 320, 16)];
+    codeLabel.stringValue = @"Custom Room Code (leave blank for random):";
+    codeLabel.font = [NSFont systemFontOfSize:11];
+    codeLabel.editable = NO;
+    codeLabel.bordered = NO;
+    codeLabel.backgroundColor = [NSColor clearColor];
+    [container addSubview:codeLabel];
+
+    NSTextField* codeField = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 160, 20)];
+    codeField.placeholderString = @"e.g. WAR-1234";
+    [container addSubview:codeField];
+
+    alert.accessoryView = container;
+
+    if ([alert runModal] == NSAlertFirstButtonReturn) {
+        std::string relay_str = [relayField.stringValue UTF8String];
+        std::string custom_code = [codeField.stringValue UTF8String];
+
+        std::string host = "localhost";
+        int port = 7190;
+        auto colon = relay_str.find(':');
+        if (colon != std::string::npos) {
+            host = relay_str.substr(0, colon);
+            try {
+                port = std::stoi(relay_str.substr(colon + 1));
+            } catch (...) {
+                port = 7190;
+            }
+        } else if (!relay_str.empty()) {
+            host = relay_str;
+        }
+
+        if (!mgr.host_internet_game(host, port, custom_code)) {
+            NSAlert* err = [[NSAlert alloc] init];
+            err.messageText = @"Unable to Host Match";
+            err.informativeText = @"Could not establish connection to the relay server.";
+            err.alertStyle = NSAlertStyleCritical;
+            [err addButtonWithTitle:@"OK"];
+            [err runModal];
+            return;
+        }
+
+        // Wait up to 1 second for room code confirmation
+        for (int i = 0; i < 50 && mgr.room_code().empty(); ++i) {
+            [NSThread sleepForTimeInterval:0.02];
+        }
+
+        NSString* assignedCode = [NSString stringWithUTF8String:mgr.room_code().c_str()];
+        NSAlert* info = [[NSAlert alloc] init];
+        info.messageText = @"Match Hosted Successfully";
+        info.informativeText = [NSString stringWithFormat:
+            @"Room Code: %@\n\n"
+            @"1. Share this Room Code with your opponent.\n"
+            @"2. In Command HQ, select: Multiplayer -> MODEM -> Answer.",
+            assignedCode];
+        info.alertStyle = NSAlertStyleInformational;
+        [info addButtonWithTitle:@"Copy Room Code"];
+        [info addButtonWithTitle:@"OK"];
+
+        if ([info runModal] == NSAlertFirstButtonReturn) {
+            NSPasteboard* pb = [NSPasteboard generalPasteboard];
+            [pb clearContents];
+            [pb setString:assignedCode forType:NSPasteboardTypeString];
+        }
+    }
+}
+
+- (void)joinInternetMatch:(nullable id)sender {
+    (void)sender;
+    auto& mgr = chq::net::MultiplayerManager::instance();
+    if (mgr.state() != chq::net::MultiplayerState::Disconnected) {
+        NSAlert* confirm = [[NSAlert alloc] init];
+        confirm.messageText = @"Active Multiplayer Session";
+        confirm.informativeText = @"A multiplayer session is already active. Disconnect and join a new match?";
+        confirm.alertStyle = NSAlertStyleWarning;
+        [confirm addButtonWithTitle:@"Disconnect & Join"];
+        [confirm addButtonWithTitle:@"Cancel"];
+        if ([confirm runModal] != NSAlertFirstButtonReturn) {
+            return;
+        }
+        mgr.disconnect();
+    }
+
+    NSAlert* alert = [[NSAlert alloc] init];
+    alert.messageText = @"Join Internet Match";
+    alert.informativeText = @"Enter the Room Code provided by the host:";
+    alert.alertStyle = NSAlertStyleInformational;
+    [alert addButtonWithTitle:@"Join Match"];
+    [alert addButtonWithTitle:@"Cancel"];
+
+    NSView* container = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 320, 85)];
+
+    NSTextField* codeLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 60, 320, 18)];
+    codeLabel.stringValue = @"Room Code:";
+    codeLabel.editable = NO;
+    codeLabel.bordered = NO;
+    codeLabel.backgroundColor = [NSColor clearColor];
+    [container addSubview:codeLabel];
+
+    NSTextField* codeField = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 38, 320, 22)];
+    codeField.placeholderString = @"e.g. WAR-ABCD";
+    [container addSubview:codeField];
+
+    NSTextField* relayLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 18, 320, 16)];
+    relayLabel.stringValue = @"Relay Server (host:port or localhost):";
+    relayLabel.font = [NSFont systemFontOfSize:11];
+    relayLabel.editable = NO;
+    relayLabel.bordered = NO;
+    relayLabel.backgroundColor = [NSColor clearColor];
+    [container addSubview:relayLabel];
+
+    const char* env_relay = std::getenv("CHQ_RELAY_SERVER");
+    NSString* defRelay = (env_relay && env_relay[0]) ? [NSString stringWithUTF8String:env_relay] : @"localhost:7190";
+    NSTextField* relayField = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 320, 20)];
+    relayField.stringValue = defRelay;
+    [container addSubview:relayField];
+
+    alert.accessoryView = container;
+
+    if ([alert runModal] == NSAlertFirstButtonReturn) {
+        std::string room_code = [codeField.stringValue UTF8String];
+        std::string relay_str = [relayField.stringValue UTF8String];
+
+        if (room_code.empty()) {
+            NSAlert* err = [[NSAlert alloc] init];
+            err.messageText = @"Missing Room Code";
+            err.informativeText = @"Please enter a valid Room Code to join.";
+            err.alertStyle = NSAlertStyleWarning;
+            [err addButtonWithTitle:@"OK"];
+            [err runModal];
+            return;
+        }
+
+        std::string host = "localhost";
+        int port = 7190;
+        auto colon = relay_str.find(':');
+        if (colon != std::string::npos) {
+            host = relay_str.substr(0, colon);
+            try {
+                port = std::stoi(relay_str.substr(colon + 1));
+            } catch (...) {
+                port = 7190;
+            }
+        } else if (!relay_str.empty()) {
+            host = relay_str;
+        }
+
+        if (!mgr.join_internet_game(host, port, room_code)) {
+            NSAlert* err = [[NSAlert alloc] init];
+            err.messageText = @"Connection Failed";
+            err.informativeText = @"Unable to connect to the relay server or room.";
+            err.alertStyle = NSAlertStyleCritical;
+            [err addButtonWithTitle:@"OK"];
+            [err runModal];
+            return;
+        }
+
+        NSAlert* info = [[NSAlert alloc] init];
+        info.messageText = @"Connecting to Room";
+        info.informativeText = [NSString stringWithFormat:
+            @"Connecting to room %@...\n\n"
+            @"In Command HQ, select: Multiplayer -> MODEM -> Call (Dial).",
+            [NSString stringWithUTF8String:room_code.c_str()]];
+        info.alertStyle = NSAlertStyleInformational;
+        [info addButtonWithTitle:@"OK"];
+        [info runModal];
+    }
+}
+
+- (void)directMatch:(nullable id)sender {
+    (void)sender;
+    auto& mgr = chq::net::MultiplayerManager::instance();
+    if (mgr.state() != chq::net::MultiplayerState::Disconnected) {
+        NSAlert* confirm = [[NSAlert alloc] init];
+        confirm.messageText = @"Active Multiplayer Session";
+        confirm.informativeText = @"A multiplayer session is already active. Disconnect?";
+        confirm.alertStyle = NSAlertStyleWarning;
+        [confirm addButtonWithTitle:@"Disconnect"];
+        [confirm addButtonWithTitle:@"Cancel"];
+        if ([confirm runModal] != NSAlertFirstButtonReturn) return;
+        mgr.disconnect();
+    }
+
+    NSAlert* alert = [[NSAlert alloc] init];
+    alert.messageText = @"Direct LAN / IP Match";
+    alert.informativeText = @"Connect directly over local network (LAN) or direct IP address:";
+    alert.alertStyle = NSAlertStyleInformational;
+    [alert addButtonWithTitle:@"Host (Listen)"];
+    [alert addButtonWithTitle:@"Join (Connect)"];
+    [alert addButtonWithTitle:@"Cancel"];
+
+    NSView* container = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 320, 60)];
+    NSTextField* hostLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 35, 320, 18)];
+    hostLabel.stringValue = @"Remote Host (IP or hostname, for Join):";
+    hostLabel.editable = NO;
+    hostLabel.bordered = NO;
+    hostLabel.backgroundColor = [NSColor clearColor];
+    [container addSubview:hostLabel];
+
+    NSTextField* hostField = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 15, 200, 20)];
+    hostField.stringValue = @"127.0.0.1";
+    [container addSubview:hostField];
+
+    NSTextField* portField = [[NSTextField alloc] initWithFrame:NSMakeRect(210, 15, 100, 20)];
+    portField.stringValue = @"7190";
+    [container addSubview:portField];
+
+    alert.accessoryView = container;
+
+    NSModalResponse resp = [alert runModal];
+    int port = 7190;
+    try {
+        port = std::stoi([portField.stringValue UTF8String]);
+    } catch (...) {}
+
+    if (resp == NSAlertFirstButtonReturn) {
+        // Host (Listen)
+        if (mgr.host_lan_game(port)) {
+            NSAlert* info = [[NSAlert alloc] init];
+            info.messageText = @"Listening for Direct Connection";
+            info.informativeText = [NSString stringWithFormat:
+                @"Listening on port %d.\nIn Command HQ, select: Multiplayer -> DIRECT or MODEM -> Answer.", port];
+            [info addButtonWithTitle:@"OK"];
+            [info runModal];
+        }
+    } else if (resp == NSAlertSecondButtonReturn) {
+        // Join (Connect)
+        std::string host = [hostField.stringValue UTF8String];
+        if (mgr.join_lan_game(host, port)) {
+            NSAlert* info = [[NSAlert alloc] init];
+            info.messageText = @"Connecting to Direct Host";
+            info.informativeText = [NSString stringWithFormat:
+                @"Connecting to %s:%d...\nIn Command HQ, select: Multiplayer -> DIRECT or MODEM -> Call.", host.c_str(), port];
+            [info addButtonWithTitle:@"OK"];
+            [info runModal];
+        }
+    }
+}
+
+- (void)disconnectMultiplayer:(nullable id)sender {
+    (void)sender;
+    chq::net::MultiplayerManager::instance().disconnect();
 }
 
 - (void)revealSavesFolder:(nullable id)sender {
@@ -671,7 +1005,69 @@ void setup_macos_app(SDL_Window* window, const SoundBridgeCallbacks& callbacks) 
             }
         }
 
-        // 4. Add Help Menu
+        // 4. Add Multiplayer Menu
+        NSInteger mpIdx = [mainMenu indexOfItemWithTitle:@"Multiplayer"];
+        if (mpIdx < 0) {
+            NSMenu* mpMenu = [[NSMenu alloc] initWithTitle:@"Multiplayer"];
+
+            NSMenuItem* hostItem = [[NSMenuItem alloc] initWithTitle:@"Host Internet Match…"
+                                                              action:@selector(hostInternetMatch:)
+                                                       keyEquivalent:@""];
+            hostItem.target = s_controller;
+            [mpMenu addItem:hostItem];
+            s_controller.mpHostItem = hostItem;
+
+            NSMenuItem* joinItem = [[NSMenuItem alloc] initWithTitle:@"Join Internet Match…"
+                                                              action:@selector(joinInternetMatch:)
+                                                       keyEquivalent:@""];
+            joinItem.target = s_controller;
+            [mpMenu addItem:joinItem];
+            s_controller.mpJoinItem = joinItem;
+
+            [mpMenu addItem:[NSMenuItem separatorItem]];
+
+            NSMenuItem* directItem = [[NSMenuItem alloc] initWithTitle:@"Direct LAN / IP Match…"
+                                                                action:@selector(directMatch:)
+                                                         keyEquivalent:@""];
+            directItem.target = s_controller;
+            [mpMenu addItem:directItem];
+            s_controller.mpDirectItem = directItem;
+
+            [mpMenu addItem:[NSMenuItem separatorItem]];
+
+            NSMenuItem* discItem = [[NSMenuItem alloc] initWithTitle:@"Disconnect"
+                                                              action:@selector(disconnectMultiplayer:)
+                                                       keyEquivalent:@""];
+            discItem.target = s_controller;
+            [mpMenu addItem:discItem];
+            s_controller.mpDisconnectItem = discItem;
+
+            [mpMenu addItem:[NSMenuItem separatorItem]];
+
+            NSMenuItem* statusItem = [[NSMenuItem alloc] initWithTitle:@"Status: Inactive"
+                                                                action:nil
+                                                         keyEquivalent:@""];
+            statusItem.enabled = NO;
+            [mpMenu addItem:statusItem];
+            s_controller.mpStatusItem = statusItem;
+
+            NSMenuItem* mpTopItem = [[NSMenuItem alloc] initWithTitle:@"Multiplayer" action:nil keyEquivalent:@""];
+            mpTopItem.submenu = mpMenu;
+
+            NSInteger windowIdx = [mainMenu indexOfItemWithTitle:@"Window"];
+            if (windowIdx >= 0) {
+                [mainMenu insertItem:mpTopItem atIndex:windowIdx];
+            } else {
+                NSInteger helpPos = [mainMenu indexOfItemWithTitle:@"Help"];
+                if (helpPos >= 0) {
+                    [mainMenu insertItem:mpTopItem atIndex:helpPos];
+                } else {
+                    [mainMenu addItem:mpTopItem];
+                }
+            }
+        }
+
+        // 5. Add Help Menu
         NSInteger helpIdx = [mainMenu indexOfItemWithTitle:@"Help"];
         if (helpIdx < 0) {
             NSMenu* helpMenu = [[NSMenu alloc] initWithTitle:@"Help"];
@@ -747,6 +1143,44 @@ void show_settings_window() {
 void show_help_window() {
     if (s_controller) {
         [s_controller openHelpWindow:nil];
+    }
+}
+
+bool prompt_open_save_panel(char* out_path, std::size_t max_len, const char* default_dir) {
+    if (!out_path || max_len == 0) return false;
+    @autoreleasepool {
+        NSOpenPanel* panel = [NSOpenPanel openPanel];
+        panel.title = @"Resume Saved War";
+        panel.message = @"Select a Command HQ saved game file (CHQ-xx.SG) to resume:";
+        panel.canChooseFiles = YES;
+        panel.canChooseDirectories = NO;
+        panel.allowsMultipleSelection = NO;
+        panel.allowedFileTypes = @[ @"sg", @"SG" ];
+        panel.allowsOtherFileTypes = YES;
+
+        if (default_dir && default_dir[0]) {
+            panel.directoryURL = [NSURL fileURLWithPath:[NSString stringWithUTF8String:default_dir]];
+        }
+
+        if ([panel runModal] == NSModalResponseOK) {
+            NSString* path = panel.URL.path;
+            if (path.length > 0 && path.length < max_len) {
+                const char* cPath = [path UTF8String];
+                if (!chq::validate_save_file(cPath)) {
+                    NSAlert* alert = [[NSAlert alloc] init];
+                    alert.messageText = @"Invalid Save File";
+                    alert.informativeText = @"The selected file is not a valid Command HQ saved game (CHQ-xx.SG).";
+                    alert.alertStyle = NSAlertStyleWarning;
+                    [alert addButtonWithTitle:@"OK"];
+                    [alert runModal];
+                    return false;
+                }
+                std::strncpy(out_path, cPath, max_len - 1);
+                out_path[max_len - 1] = '\0';
+                return true;
+            }
+        }
+        return false;
     }
 }
 

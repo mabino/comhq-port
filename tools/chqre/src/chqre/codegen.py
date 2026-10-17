@@ -264,6 +264,14 @@ class _SegmentGen:
         out += ["        default: return;", "    }"]
         for start, body in self.blocks:
             out.append(f"L_{start:05x}:")
+            if start == 0x102ef:
+                out.append("    if (m.resume_saved_war_hook) {")
+                out.append("        c.r[4] = static_cast<std::uint16_t>(c.r[4] + 0x4);")
+                out.append("        const int act = m.resume_saved_war_hook(m);")
+                out.append("        if (act == 1) goto L_10302;")
+                out.append("        if (act == 2) goto L_10394;")
+                out.append("        c.r[4] = static_cast<std::uint16_t>(c.r[4] - 0x4);")
+                out.append("    }")
             if start == 0x1049e:
                 out.append("    if (m.in_game_save_hook) {")
                 out.append("        const int act = m.in_game_save_hook(m);")

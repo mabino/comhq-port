@@ -27,6 +27,7 @@
 #include "core/save_file.h"
 #include "dos/machine.h"
 #include "dos/rom_font.h"
+#include "net/multiplayer_manager.h"
 #if CHQ_HAVE_GAME
 #include "dos/recomp.h"
 #endif
@@ -265,6 +266,7 @@ void start_game([[maybe_unused]] App& app) {
     SDL_Log("data: %s", data.string().c_str());
     app.machine = std::make_unique<chq::dos::Machine>(chq::recomp::program(),
                                                       chq::dos::FileSystem{data, saves});
+    app.machine->set_modem_bridge(chq::net::MultiplayerManager::instance().modem_bridge());
     sync_machine_settings(app);
     app.machine->set_save_hook([&app](chq::dos::Machine&, const fs::path& p) {
         app.active_save_path = p.string();
@@ -289,6 +291,27 @@ void start_game([[maybe_unused]] App& app) {
         }
         m.wr8(m.cpu.s[3], static_cast<std::uint16_t>(0xc5c2 + std::min<std::size_t>(fn.size(), 64)), 0);
         return 1;  // Save
+#else
+        (void)app;
+        (void)m;
+        return 0;
+#endif
+    };
+    app.machine->resume_saved_war_hook = [&app](chq::dos::Machine& m) -> int {
+#if defined(__APPLE__) && !defined(__EMSCRIPTEN__)
+        char chosen[1024] = {0};
+        const char* def_dir = app.default_save_dir.empty() ? nullptr : app.default_save_dir.c_str();
+        if (!chq::macos::prompt_open_save_panel(chosen, sizeof(chosen), def_dir)) {
+            return 2;  // Cancel
+        }
+        app.active_save_path = chosen;
+        m.set_active_save_path(app.active_save_path);
+        const std::string fn = fs::path(app.active_save_path).filename().string();
+        for (std::size_t i = 0; i < fn.size() && i < 64; ++i) {
+            m.wr8(m.cpu.s[3], static_cast<std::uint16_t>(0xc5c2 + i), static_cast<std::uint8_t>(fn[i]));
+        }
+        m.wr8(m.cpu.s[3], static_cast<std::uint16_t>(0xc5c2 + std::min<std::size_t>(fn.size(), 64)), 0);
+        return 1;  // Load
 #else
         (void)app;
         (void)m;
@@ -673,6 +696,7 @@ SDL_AppResult step_app_frame(App& app) {
         app.emulated_now_ms += delta_ms;
         const double now = app.emulated_now_ms;
 
+        chq::net::MultiplayerManager::instance().update();
         const auto st = app.machine->run(kBlocksPerFrame, now);
 #if defined(__EMSCRIPTEN__)
         if (app.machine->file_writes() != app.persisted_writes) {
